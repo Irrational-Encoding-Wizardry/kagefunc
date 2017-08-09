@@ -7,8 +7,10 @@ core = vs.core  # R37 or newer
 
 # TODO fixedge port
 
-def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4, a1=1/3, a2=1/3, invks=True, mask_detail=False,
-                  masking_areas=None, mask_highpass=0.3, denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
+
+def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4, a1=1/3,
+                  a2=1/3, invks=True, mask_detail=False, masking_areas=None, mask_highpass=0.3, denoise=False,
+                  bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
     """
     source = input clip
     width, height, kernel, taps, a1, a2 are parameters for resizing
@@ -63,10 +65,9 @@ def plane_array_to_clip(planes, family=vs.YUV):
     return core.std.ShufflePlanes(clips=planes, planes=[0]*len(planes), colorfamily=family)
 
 
-def generate_mask(source, w=None, h=720, kernel='bilinear', taps=4, a1=0.15, a2=0.5, highpass=0.3, unresize=False):
+def generate_mask(source, w=None, h=720, kernel='bilinear', taps=4, a1=0.15, a2=0.5, highpass=0.3):
     if w is None: w = getw(h)
-    mask = mask_detail(source, w, h, kernel=kernel, taps=taps, invkstaps=taps, a1=a1, a2=a2, cutoff=highpass,
-                       unresize=unresize)
+    mask = mask_detail(source, w, h, kernel=kernel, taps=taps, invkstaps=taps, a1=a1, a2=a2, cutoff=highpass)
     return mask
 
 
@@ -284,16 +285,16 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
         expandN = clip.width // 200
     if mode in ['default', None]:
 
-    def skip(n, f):
-        if f.props.PlaneStatsMaximum == 0:
-            return core.std.BlankClip(clip, format=vs.GRAYS, color=[0])
-        else:
-            subedge = core.std.Expr(c444, 'x y z min min')
-            diff = core.std.Expr([getY(clip).std.Convolution([1]*9), getY(ref).std.Convolution([1]*9)], 'x 0.8 > x 0.2 < or x y - abs 0.1 > and 1 0 ?').std.Maximum().std.Maximum()
-            mask = core.misc.Hysteresis(subedge, diff)
-            mask = iterate(mask, core.std.Maximum, expandN)
-            return mask.std.Inflate().std.Inflate().std.Convolution([1]*9)
-                
+        def skip(n, f):
+            if f.props.PlaneStatsMaximum == 0:
+                return core.std.BlankClip(clip, format=vs.GRAYS, color=[0])
+            else:
+                subedge = core.std.Expr(c444, 'x y z min min')
+                diff = core.std.Expr([getY(clip).std.Convolution([1]*9), getY(ref).std.Convolution([1]*9)], 'x 0.8 > x 0.2 < or x y - abs 0.1 > and 1 0 ?').std.Maximum().std.Maximum()
+                mask = core.misc.Hysteresis(subedge, diff)
+                mask = iterate(mask, core.std.Maximum, expandN)
+                return mask.std.Inflate().std.Inflate().std.Convolution([1]*9)
+
         clip = fvf.Depth(clip, 32)
         ref = fvf.Depth(ref, 32)
         right = core.resize.Point(clip, src_left=4)    # right shift by 4 pixels
@@ -301,7 +302,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
         c444 = split(subedge.resize.Bilinear(format=vs.YUV444PS))
         luma = c444[0].std.PlaneStats()
         mask = core.std.FrameEval()
-        
+
     elif mode == 'fast':
         bits = clip.format.bits_per_sample
         clip, ref = getY(clip), getY(ref)
