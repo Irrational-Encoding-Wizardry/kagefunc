@@ -271,7 +271,7 @@ def get_descale_filter(kernel: str, **kwargs):
     return FILTERS[kernel](**kwargs)
 
 
-def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=None) -> vs.VideoNode:
+def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=None, highpass=25) -> vs.VideoNode:
     """
     Uses multiple techniques to mask the hardsubs in video streams like Anime on Demand or Wakanim.
     Might (should) work for other hardsubs, too, as long as the subs are somewhat close to black/white.
@@ -279,40 +279,66 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
     It works by finding the edge of the subtitle (where the black border and the white fill color touch),
     and it grows these areas into a regular brightness + difference mask via hysteresis.
     This should (in theory) reliably find all hardsubs in the image with barely any false positives (or none at all).
-    Output is 32bit float for mode default, input depth for mode fast
+    Output depth and processing precision are the same as the input
+    It is not necessary for 'clip' and 'ref' to have the same bit depth, as 'ref' will be dithered to match 'clip'
+    Most of this code was written by Zastin (https://github.com/Z4ST1N)
+    Clean code soon(tm)
     """
+
+    clp_f = clip.format
+    bits = clp_f.bits_per_sample
+    st = clp_f.sample_type
+    peak = 1 if st == vs.FLOAT else (1 << bits) - 1
+
     if expandN is None:
         expandN = clip.width // 200
-    if mode in ['default', None]:
+    #if mode in ['default', None]:
 
-        def skip(n, f):
-            if f.props.PlaneStatsMaximum == 0:
-                return core.std.BlankClip(clip, format=vs.GRAYS, color=[0])
-            else:
-                subedge = core.std.Expr(c444, 'x y z min min')
-                diff = core.std.Expr([getY(clip).std.Convolution([1]*9), getY(ref).std.Convolution([1]*9)], 'x 0.8 > x 0.2 < or x y - abs 0.1 > and 1 0 ?').std.Maximum().std.Maximum()
-                mask = core.misc.Hysteresis(subedge, diff)
-                mask = iterate(mask, core.std.Maximum, expandN)
-                return mask.std.Inflate().std.Inflate().std.Convolution([1]*9)
+    out_fmt = core.register_format(vs.GRAY, st, bits, 0, 0)
+    YUV_fmt = core.register_format(clp_f.color_family, vs.INTEGER, 8, clp_f.subsampling_w, clp_f.subsampling_h)
 
-        clip = fvf.Depth(clip, 32)
-        ref = fvf.Depth(ref, 32)
-        right = core.resize.Point(clip, src_left=4)    # right shift by 4 pixels
-        subedge = core.std.Expr([clip, right], ['x y - abs 0.7 > 1 0 ?', 'x abs 0.1 < y abs 0.1 < and 1 0 ?'])
-        c444 = split(subedge.resize.Bilinear(format=vs.YUV444PS))
-        luma = c444[0].std.PlaneStats()
-        mask = core.std.FrameEval()
+    y_range = 219 << (bits - 8) if st == vs.INTEGER else 1
+    uv_range = 224 << (bits - 8) if st == vs.INTEGER else 1
+    offset = 16 << (bits - 8) if st == vs.INTEGER else 0
 
+    uv_abs = ' abs ' if st == vs.FLOAT else ' {} - abs '.format((1 << bits) // 2)
+    yexpr = 'x y - abs {thr} > 255 0 ?'.format(thr=y_range * 0.7)
+    uvexpr = 'x {uv_abs} {thr} < y {uv_abs} {thr} < and 255 0 ?'.format(uv_abs=uv_abs, thr=uv_range * 0.1)
+
+    difexpr = 'x {upper} > x {lower} < or x y - abs {mindiff} > and 255 0 ?'.format(upper=y_range * 0.8 + offset,
+                                                                                    lower=y_range * 0.2 + offset,
+                                                                                    mindiff=y_range * 0.1)
+
+    right = core.resize.Point(clip, src_left=4)  # right shift by 4 pixels
+    subedge = core.std.Expr([clip, right], [yexpr, uvexpr], YUV_fmt.id)
+    c444 = split(subedge.resize.Bicubic(format=vs.YUV444P8, filter_param_a=0, filter_param_b=0.5))
+    subedge = core.std.Expr(c444, 'x y z min min')
+
+    clip, ref = getY(clip), getY(ref)
+    ref = ref if clip.format == ref.format else fvf.Depth(ref, bits)
+
+    clips = [clip.std.Convolution([1] * 9), ref.std.Convolution([1] * 9)]
+    diff = core.std.Expr(clips, difexpr, vs.GRAY8).std.Maximum().std.Maximum()
+
+    mask = core.misc.Hysteresis(subedge, diff)
+    mask = iterate(mask, core.std.Maximum, expandN)
+    mask = mask.std.Inflate().std.Inflate().std.Convolution([1] * 9)
+    mask = fvf.Depth(mask, bits, range=1, range_in=1)
+
+    """
+    # needs some more testing
     elif mode == 'fast':
-        bits = clip.format.bits_per_sample
+        highpass = highpass << (bits - 8) if st == vs.INTEGER else highpass / 255
         clip, ref = getY(clip), getY(ref)
+        ref = ref if clip.format == ref.format else fvf.Depth(ref, bits)
         edge = clip.std.Sobel()
-        diff = core.std.Expr(clip, ref, 'x y - abs {:d} < 0 {:d} ?'.format(highpass << (bits-8), (1 << bits) - 1))
+        diff = core.std.Expr([clip, ref], 'x y - abs {:d} < 0 {:d} ?'.format(highpass, peak))
         mask = core.misc.Hysteresis(edge, diff)
         mask = iterate(mask, core.std.Maximum, expandN)
-        mask = mask.std.Convolution([1]*9)
+        mask = mask.std.Convolution([1] * 9)
     else:
         raise ValueError('hardsubmask: Unknown mode')
+    """
     return mask
 
 # TODO: add as mode to hardsubmask
@@ -423,10 +449,6 @@ def getw(h, ar=16 / 9, only_even=True):
     if only_even:
         w = w // 2 * 2
     return w
-
-
-def shiftl(x, bits):
-    return x << bits if bits >= 0 else x >> -bits
 
 
 def fit_subsampling(x, sub):
