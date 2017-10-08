@@ -5,11 +5,13 @@ from functools import partial
 
 core = vs.core  # R37 or newer
 
+
 # TODO fixedge port
 
 
-def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4, a1=1/3,
-                  a2=1/3, invks=True, mask_detail=False, masking_areas=None, mask_highpass=0.3, denoise=False,
+def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
+                  a1=1 / 3,
+                  a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_highpass=0.3, denoise=False,
                   bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
     """
     source = input clip
@@ -24,7 +26,7 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
     if source.format.bits_per_sample != 32:
         source = core.fmtc.bitdepth(source, bits=32)
     if width is None:
-        width = getw(height, ar=source.width/source.height)
+        width = getw(height, ar=source.width / source.height)
     planes = clip_to_plane_array(source)
     if denoise and use_gpu:
         planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
@@ -62,7 +64,7 @@ def clip_to_plane_array(clip):
 
 
 def plane_array_to_clip(planes, family=vs.YUV):
-    return core.std.ShufflePlanes(clips=planes, planes=[0]*len(planes), colorfamily=family)
+    return core.std.ShufflePlanes(clips=planes, planes=[0] * len(planes), colorfamily=family)
 
 
 def generate_mask(source, w=None, h=720, kernel='bilinear', taps=4, a1=0.15, a2=0.5, highpass=0.3):
@@ -125,7 +127,8 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
     text_file.close()
 
 
-def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=12, mask_bits=8, show_mask=False) -> vs.VideoNode:
+def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=12, mask_bits=8,
+                   show_mask=False) -> vs.VideoNode:
     """
     generates grain based on frame and pixel brightness.
     details can be found here: https://kageru.moe/article.php?p=adaptivegrain
@@ -246,6 +249,7 @@ def kirsch(src: vs.VideoNode) -> vs.VideoNode:
     c = [core.std.Convolution(src, (w[:4] + [0] + w[4:]), saturate=False) for w in weights]
     return core.std.Expr(c, 'x y max z max a max')
 
+
 def fast_sobel(src: vs.VideoNode) -> vs.VideoNode:
     """
     Should behave similar to std.Sobel() but faster since it has no additional high-/lowpass, gain, or the sqrt.
@@ -292,7 +296,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
 
     if expandN is None:
         expandN = clip.width // 200
-    #if mode in ['default', None]:
+    # if mode in ['default', None]:
 
     out_fmt = core.register_format(vs.GRAY, st, bits, 0, 0)
     YUV_fmt = core.register_format(clp_f.color_family, vs.INTEGER, 8, clp_f.subsampling_w, clp_f.subsampling_h)
@@ -347,6 +351,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
     """
     return mask
 
+
 # TODO: add as mode to hardsubmask
 def hardsubmask_fades(clip, ref, expandN=8, highpass=5000):
     """
@@ -358,8 +363,8 @@ def hardsubmask_fades(clip, ref, expandN=8, highpass=5000):
     Setting highpass to a lower value may catch very slight changes (e.g. the last frame of a low-contrast fade),
     but it will make the mask more susceptible to artifacts.
     """
-    clip = core.fmtc.bitdepth(clip, bits=16).std.Convolution([1]*9)
-    ref = core.fmtc.bitdepth(ref, bits=16).std.Convolution([1]*9)
+    clip = core.fmtc.bitdepth(clip, bits=16).std.Convolution([1] * 9)
+    ref = core.fmtc.bitdepth(ref, bits=16).std.Convolution([1] * 9)
     clipedge = getY(clip).std.Sobel()
     refedge = getY(ref).std.Sobel()
     mask = core.std.Expr([clipedge, refedge], 'x y - {} < 0 65535 ?'.format(highpass)).std.Median()
@@ -373,8 +378,10 @@ def crossfade(clipa, clipb, duration):
     Crossfade clipa into clipb. Duration is the length of the blending zone.
     For example, crossfade(a, b, 100) will fade the last 100 frames of a into b.
     """
+
     def fade_image(n, clipa, clipb):
-        return core.std.Merge(clipa, clipb, weight=n/clipa.num_frames)
+        return core.std.Merge(clipa, clipb, weight=n / clipa.num_frames)
+
     # lol, >error handling
     if clipa.format.id != clipb.format.id or clipa.height != clipb.height or clipa.width != clipb.width:
         raise ValueError('Crossfade: Both clips must have the same dimensions and format.')
@@ -464,7 +471,7 @@ def fit_subsampling(x, sub):
     The number is then truncated to be a compatible resolution.
     """
     return (x >> bits) << bits
-    #return x & (0xffffffff - 1 << sub -1);
+    # return x & (0xffffffff - 1 << sub -1);
 
 
 # TODO: some more clean-up
@@ -475,6 +482,7 @@ def mask_detail(startclip, final_width, final_height, cutoff=16384, kernel='bili
     His version is not compatible with the new name spaces of vapoursynth R33+, so I included this 'fixed' version here
     I also removed all features and subfunctions that are not used by inverse_scale
     """
+
     def luma16(x):
         x <<= 4
         value = x & 0xFFFF
