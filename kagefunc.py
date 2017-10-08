@@ -309,7 +309,13 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
                                                                                     lower=y_range * 0.2 + offset,
                                                                                     mindiff=y_range * 0.1)
 
-    right = core.resize.Point(clip, src_left=4)  # right shift by 4 pixels
+    # right shift by 4 pixels.
+    # fmtc uses at least 16 bit internally, so it's slower for 8 bit,
+    # but its behaviour when shifting/replicating edge pixels makes it faster otherwise
+    if bits < 16:
+        right = core.resize.Point(clip, src_left=4)
+    else:
+        right = core.fmtc.resample(clip, sx=4, flt=False)
     subedge = core.std.Expr([clip, right], [yexpr, uvexpr], YUV_fmt.id)
     c444 = split(subedge.resize.Bicubic(format=vs.YUV444P8, filter_param_a=0, filter_param_b=0.5))
     subedge = core.std.Expr(c444, 'x y z min min')
