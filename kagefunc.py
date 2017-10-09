@@ -10,9 +10,8 @@ core = vs.core  # R37 or newer
 
 
 def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
-                  a1=1 / 3,
-                  a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_highpass=0.3, denoise=False,
-                  bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
+                  a1=1 / 3, a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_highpass=0.3,
+                  denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
     """
     source = input clip
     width, height, kernel, taps, a1, a2 are parameters for resizing
