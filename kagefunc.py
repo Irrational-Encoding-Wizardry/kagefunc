@@ -71,7 +71,7 @@ def plane_array_to_clip(planes, family=vs.YUV):
 
 
 def generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, a1=1/3, a2=1/3, threshold=0.05):
-    upscaled = fvs.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=a1, a2=a2)
+    upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=a1, a2=a2)
     return core.std.Expr([source, upscaled], 'x y - abs').std.Binarize(threshold)
 
 
