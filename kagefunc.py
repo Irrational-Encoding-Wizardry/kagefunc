@@ -3,46 +3,50 @@ import mvsfunc as mvf
 import fvsfunc as fvf
 from functools import partial
 
-core = vs.core  # R37 or newer
+core = vs.core
 
 
 # TODO fixedge port
 
 
 def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
-                  a1=1 / 3, a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_highpass=0.3,
+                  a1=1 / 3, a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_threshold=0.05,
                   denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
     """
     source = input clip
-    width, height, kernel, taps, a1, a2 are parameters for resizing
-    mask_detail, masking_areas, mask_highpass are parameters for masking; mask_detail = False to disable
+    width, height, kernel, taps, a1, a2 are parameters for resizing.
+    mask_detail, masking_areas, mask_threshold are parameters for masking; mask_detail = False to disable.
     masking_areas takes frame tuples to define areas which will be masked (e.g. opening and ending)
     masking_areas = [[1000, 2500], [30000, 32000]]. Start and end frame are inclusive.
-    mask_highpass is used to remove small artifacts from the mask. Value must be normalized.
-    denoise, bm3d_sigma, knl_strength, and use_gpu are parameters for denoising; denoise = False to disable
+    mask_threshold is the binarization threshold. Value must be normalized for floats (0-1) or an 8-bit integer.
+    denoise, bm3d_sigma, knl_strength, use_gpu are parameters for denoising; denoise = False to disable
     use_gpu = True -> chroma will be denoised with KNLMeansCL (faster)
     """
     if source.format.bits_per_sample != 32:
-        source = core.fmtc.bitdepth(source, bits=32)
+        # If this returns an error, make sure you're using R39 or newer
+        source = source.resize.Point(source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
+    luma = getY(source)
     if width is None:
         width = getw(height, ar=source.width / source.height)
+    if mask_threshold > 1:
+        mask_threshold /= 255
     planes = clip_to_plane_array(source)
     if denoise and use_gpu:
+        # I'd really like to use the newer versions that support processing both chroma planes in a single call,
+        # but I just can't get them to work on my system. I should probably report that as a bug at some point.
         planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
                                 for plane in planes[1:]]
-        planes = inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
-        planes[0] = mvf.BM3D(planes[0], sigma=bm3d_sigma, radius1=1)
-    else:
-        planes = inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
-    scaled = plane_array_to_clip(planes)
-    if denoise and not use_gpu:
-        scaled = mvf.BM3D(scaled, radius1=1, sigma=bm3d_sigma)
+    planes = inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
+    
     if mask_detail:
-        mask = generate_mask(source, width, height, kernel, taps, a1, a2, mask_highpass)
+        mask = generate_detail_mask(luma, planes[0], kernel, taps, a1, a2, mask_threshold)
         if masking_areas is None:
-            scaled = apply_mask(source, scaled, mask)
+            planes[0] = apply_mask(luma, planes[0], mask)
         else:
-            scaled = apply_mask_to_area(source, scaled, mask, masking_areas)
+            planes[0] = apply_mask_to_area(luma, planes[0], mask, masking_areas)
+    scaled = plane_array_to_clip(planes)
+    if denoise:
+        scaled = mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma)
     return scaled
 
 
@@ -66,24 +70,20 @@ def plane_array_to_clip(planes, family=vs.YUV):
     return core.std.ShufflePlanes(clips=planes, planes=[0] * len(planes), colorfamily=family)
 
 
-def generate_mask(source, w=None, h=720, kernel='bilinear', taps=4, a1=0.15, a2=0.5, highpass=0.3):
-    if w is None: w = getw(h)
-    mask = mask_detail(source, w, h, kernel=kernel, taps=taps, invkstaps=taps, a1=a1, a2=a2, cutoff=highpass)
-    return mask
+def generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, a1=1/3, a2=1/3, threshold=0.05):
+    upscaled = fvs.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=a1, a2=a2)
+    return core.std.Expr([source, upscaled], 'x y - abs').std.Binarize(threshold)
 
 
 def apply_mask(source, scaled, mask):
-    noalias = core.fmtc.resample(source, scaled.width, scaled.height, css=get_subsampling(scaled),
-                                 kernel='blackmanminlobe', taps=5)
-    masked = core.std.MaskedMerge(scaled, noalias, mask)
-    return masked
+    noalias = core.fmtc.resample(source, scaled.width, scaled.height, kernel='blackmanminlobe', taps=5)
+    return core.std.MaskedMerge(scaled, noalias, mask)
 
 
 def apply_mask_to_area(source, scaled, mask, area):
     if len(area) == 2 and isinstance(area[0], int):
         area = [[area[0], area[1]]]
-    noalias = core.fmtc.resample(source, scaled.width, scaled.height, css=get_subsampling(scaled),
-                                 kernel='blackmanminlobe', taps=5)
+    noalias = core.fmtc.resample(source, scaled.width, scaled.height, kernel='blackmanminlobe', taps=5)
     for a in area:  # TODO: use ReplaceFrames
         source_cut = core.std.Trim(noalias, a[0], a[1])
         scaled_cut = core.std.Trim(scaled, a[0], a[1])
@@ -472,47 +472,3 @@ def fit_subsampling(x, sub):
     return (x >> bits) << bits
     # return x & (0xffffffff - 1 << sub -1);
 
-
-# TODO: some more clean-up
-def mask_detail(startclip, final_width, final_height, cutoff=16384, kernel='bilinear', invkstaps=4, taps=4, a1=0.15,
-                a2=0.5):
-    """
-    Credits to MonoS @github: https://github.com/MonoS/VS-MaskDetail
-    His version is not compatible with the new name spaces of vapoursynth R33+, so I included this 'fixed' version here
-    I also removed all features and subfunctions that are not used by inverse_scale
-    """
-
-    def luma16(x):
-        x <<= 4
-        value = x & 0xFFFF
-        return 0xFFFF - value if x & 0x10000 else value
-
-    def f16(x):
-        if x < cutoff:
-            return 0
-
-        result = x * 0.75 * (0x10000 + x) / 0x10000
-        return min(0xFFFF, int(result))
-
-    original = (startclip.width, startclip.height)
-    target = (final_width, final_height, 0, 0, 0, 0)
-
-    if kernel == 'bilinear' and hasattr(core, 'unresize'):
-        temp = core.unresize.Unresize(startclip, *target[:2])
-    else:
-        temp = core.fmtc.resample(startclip, *target[:2], kernel=kernel,
-                                  invks=True, invkstaps=invkstaps, taps=taps, a1=a1, a2=a2)
-    temp = core.fmtc.resample(temp, *original, kernel=kernel, taps=taps, a1=a1, a2=a2)
-    diff = core.std.MakeDiff(startclip, temp, 0)
-
-    mask = core.std.Lut(diff, function=luma16).rgvs.RemoveGrain(mode=[3])
-    mask = core.std.Lut(mask, function=f16)
-
-    for i in range(4):
-        mask = core.std.Maximum(mask, planes=[0])
-    mask = core.std.Inflate(mask, planes=[0])
-
-    mask = core.fmtc.resample(mask, *target, taps=taps)
-
-    mask = core.std.ShufflePlanes(mask, planes=0, colorfamily=vs.GRAY)
-    return core.fmtc.bitdepth(mask, bits=16, dmode=1)
