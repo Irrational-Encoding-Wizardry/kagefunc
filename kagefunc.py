@@ -11,7 +11,7 @@ core = vs.core
 
 def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
                   a1=1 / 3, a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_threshold=0.05,
-                  denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
+                  show_mask=False, denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
     """
     source = input clip
     width, height, kernel, taps, a1, a2 are parameters for resizing.
@@ -37,9 +37,11 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
         planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
                                 for plane in planes[1:]]
     planes = inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
-    
+
     if mask_detail:
         mask = generate_detail_mask(luma, planes[0], kernel, taps, a1, a2, mask_threshold)
+        if show_mask:
+            return mask
         if masking_areas is None:
             planes[0] = apply_mask(luma, planes[0], mask)
         else:
@@ -70,9 +72,11 @@ def plane_array_to_clip(planes, family=vs.YUV):
     return core.std.ShufflePlanes(clips=planes, planes=[0] * len(planes), colorfamily=family)
 
 
-def generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, a1=1/3, a2=1/3, threshold=0.05):
+def generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, a1=1 / 3, a2=1 / 3, threshold=0.05):
     upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=a1, a2=a2)
-    return core.std.Expr([source, upscaled], 'x y - abs').std.Binarize(threshold)
+    mask = core.std.Expr([source, upscaled], 'x y - abs').resize.Bicubic(1280, 720).std.Binarize(threshold)
+    mask = iterate(mask, core.std.Maximum, 2)
+    return iterate(mask, core.std.Inflate, 2)
 
 
 def apply_mask(source, scaled, mask):
@@ -471,4 +475,3 @@ def fit_subsampling(x, sub):
     """
     return (x >> bits) << bits
     # return x & (0xffffffff - 1 << sub -1);
-
