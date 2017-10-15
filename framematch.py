@@ -13,6 +13,10 @@ def framematch(clipa: vs.VideoNode, clipb: vs.VideoNode, threshold=0.05, hardsub
     """
     # def prepare_hardsubs(clip):
 
+    # Initialize arrays for the PlaneStatsAverage of each frame.
+    values_a = [-1.]*len(clipa)
+    values_b = [-1.]*len(clipb)
+
     offset = 0
 
     if clipa.format != clipb.format:
@@ -22,19 +26,23 @@ def framematch(clipa: vs.VideoNode, clipb: vs.VideoNode, threshold=0.05, hardsub
     clipa, clipb = [c.fmtc.resample(getw(360, clipa.width / clipa.height), 360, kernel='gauss') for c in [clipa, clipb]]
     if hardsubbed:
         # remove the lower 4th of the image, but make the crop value mod 2
+        # this is also phenominally stupid because we have to return that clip later :FailFish:
         clipa, clipb = [c.std.Crop(bottom=(c.width // 8 * 2)) for c in [clipa, clipb]]
     clipa, clipb = [c.std.PlaneStats() for c in [clipa, clipb]]
 
     def pick(n, a, b):
         global offset
-        if a.get_frame(n).props.PlaneStatsAverage - b.get_frame(n + offset).props.PlaneStatsAverage > 0.1:
+        # Some kind of lazy evaluation of the list
+        if values_a[n] == -1:
+            values_a[n] = a.get_frame(n).props.PlaneStatsAverage
+        if values_b[n] == -1:
+            values_b[n] = b.get_frame(n+offset).props.PlaneStatsAverage
+         
+        while abs(values_a[n] - values_b[n+offset]) > 0.1:
             offset += 1
-            return core.std.FrameEval()  # recursively call this? there must be a better way
-        else:
-            # might be correct, might not be
-            diff = core.std.Expr([a[n], b[n + offset]], 'x y - abs').std.Binarize(5000)
-            if diff.std.PlaneStats().get_frame(0).props.PlaneStatsAverage < threshold:
-                return # well, return what?
+        diff = core.std.Expr([a[n], b[n + offset]], 'x y - abs')#.std.Binarize(5000)
+        if diff.std.PlaneStats().get_frame(0).props.PlaneStatsAverage < threshold:
+            return clipb[n+offset]
 
 
 def getw(h, ar=16 / 9, only_even=True):
