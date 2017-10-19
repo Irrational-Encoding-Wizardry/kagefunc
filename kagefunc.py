@@ -24,7 +24,7 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
     """
     if source.format.bits_per_sample != 32:
         # If this returns an error, make sure you're using R39 or newer
-        source = source.resize.Point(source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
+        source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
     luma = getY(source)
     if width is None:
         width = getw(height, ar=source.width / source.height)
