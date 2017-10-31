@@ -74,7 +74,7 @@ def plane_array_to_clip(planes, family=vs.YUV):
 
 def generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, a1=1 / 3, a2=1 / 3, threshold=0.05):
     upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=a1, a2=a2)
-    mask = core.std.Expr([source, upscaled], 'x y - abs')\
+    mask = core.std.Expr([source, upscaled], 'x y - abs') \
         .resize.Bicubic(downscaled.width, downscaled.height).std.Binarize(threshold)
     mask = iterate(mask, core.std.Maximum, 2)
     return iterate(mask, core.std.Inflate, 2)
@@ -229,6 +229,45 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', w=1280, h=720, thr=
 
     return core.std.FrameEval(down,
                               partial(compare, down=down, os=os, diff_os=diff_os, diff_default=diff_default))
+
+
+def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offset_y: int) -> vs.VideoNode:
+    """
+    “There must be a better way!”
+    Basically a small script that draws white rectangles on a black background.
+    Python-only replacement for manual paint/photoshop/gimp masks, as long as these don't go beyond a simple rectangle.
+    Can be merged with an edgemask to only mask certain edge areas.
+    TL;DR: Unless you're scenefiltering, this is useless.
+    """
+    bits = clip.format.bits_per_sample
+    src_w = clip.width
+    src_h = clip.height
+    mask_format = clip.format.replace(color_family=vs.GRAY)
+
+    if mask_format.sample_type == vs.FLOAT:
+        white = 1
+    else:
+        white = (1 << bits) - 1
+
+    center = core.std.BlankClip(width=width, height=height, _format=mask_format, color=white, length=clip.num_frames)
+
+    if offset_x:
+        left = core.std.BlankClip(center, width=offset_x, height=height, color=0)
+        center = core.std.StackHorizontal([left, center])
+
+    if center.width < src_w:
+        right = core.std.BlankClip(center, width=src_w - center.width, height=height, color=0)
+        center = core.std.StackHorizontal([center, right])
+
+    if offset_y:
+        top = core.std.BlankClip(center, width=src_w, height=offset_y, color=0)
+        center = core.std.StackVertical([top, center])
+
+    if center.height < src_h:
+        bottom = core.std.BlankClip(center, width=src_w, height=src_h - center.height, color=0)
+        center = core.std.StackVertical([center, bottom])
+
+    return center
 
 
 def retinex_edgemask(src: vs.VideoNode, sigma=1) -> vs.VideoNode:
