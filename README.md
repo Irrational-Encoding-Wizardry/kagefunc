@@ -5,7 +5,7 @@ Documentation/explanation for each function is given in the docstring.\
 A list of dependencies can be found... nowhere, actually. 
 I might take the time at some point to create a proper AUR package with all of them. Emphasis on *might*.
   
-Message kageru#7109 on discord for questions and suggestions that are not within the scope of a git issue.
+Message kageru#1337 on discord for questions and suggestions that are not within the scope of a git issue.
   
   
   
