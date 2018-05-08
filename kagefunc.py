@@ -113,12 +113,11 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
     """
     probably only useful for fansubbing
     generates qp-filename for keyframes to simplify timing
-    disclaimer: I don't actually know why -1 is forced. I just ported the avisynth script
     """
     import os
     clip = core.resize.Bilinear(clip, 640, 360)  # speed up the analysis by resizing first
     clip = core.wwxd.WWXD(clip)
-    out_txt = ""
+    out_txt = "# WWXD log file, using qpfile format\n\n"
     for i in range(clip.num_frames):
         if clip.get_frame(i).props.Scenechange == 1:
             out_txt += "%d I -1\n" % i
