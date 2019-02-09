@@ -395,7 +395,6 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
     return mask
 
 
-# TODO: add as mode to hardsubmask
 def hardsubmask_fades(clip, ref, expandN=8, highpass=5000):
     """
     Uses Sobel edge detection to find edges that are only present in the main clip.
@@ -440,11 +439,10 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
     BM3D's sigma default is 5, KNL's is 1.2, to give you an idea of the order of magnitude
     radius1 = temporal radius of luma denoising, 0 for purely spatial denoising
     """
-    planes = clip_to_plane_array(src)
-    planes[0] = mvf.BM3D(planes[0], radius1=radius1, sigma=sigma)
-    planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl, d=3, device_type='gpu', device_id=0)
-                            for plane in planes[1:]]
-    return core.std.ShufflePlanes(clips=planes, planes=[0, 0, 0], colorfamily=vs.YUV)
+    y = getY(src)
+    y = mvf.BM3D(y, radius1=radius1, sigma=sigma)
+    denoised = core.knlm.KNLMeansCL(src, a=2, h=knl, d=3, device_type='gpu', device_id=0, channels='UV')
+    return core.std.ShufflePlanes([y, denoised], planes=[0, 1, 2], colorfamily=vs.YUV)
 
 
 def insert_clip(ep, op, startframe):
