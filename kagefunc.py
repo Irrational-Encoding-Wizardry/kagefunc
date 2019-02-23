@@ -1,7 +1,11 @@
+"""
+kageru’s collection of vapoursynth functions.
+Mostly abandoned nowadays, but if something breaks, you can always yell at me until I fix it.
+"""
+from functools import partial
 import vapoursynth as vs
 import mvsfunc as mvf
 import fvsfunc as fvf
-from functools import partial
 
 core = vs.core
 
@@ -10,7 +14,7 @@ core = vs.core
 
 
 def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
-                  a1=1 / 3, a2=1 / 3, invks=True, mask_detail=False, masking_areas=None, mask_threshold=0.05,
+                  a1=1/3, a2=1/3, invks=True, mask_detail=False, masking_areas=None, mask_threshold=0.05,
                   show_mask=False, denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
     """
     source = input clip
@@ -26,66 +30,65 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
         # If this returns an error, make sure you're using R39 or newer
         source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
     luma = getY(source)
-    if width is None:
-        width = getw(height, ar=source.width / source.height)
+    width = fallback(width, getw(height, source.width/source.height))
     if mask_threshold > 1:
         mask_threshold /= 255
-    planes = clip_to_plane_array(source)
+    planes = _clip_to_plane_array(source)
     if denoise and use_gpu:
         # I'd really like to use the newer versions that support processing both chroma planes in a single call,
         # but I just can't get them to work on my system. I should probably report that as a bug at some point.
         planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
                                 for plane in planes[1:]]
-    planes = inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
+    planes = _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
 
     if mask_detail:
-        mask = generate_detail_mask(luma, planes[0], kernel, taps, a1, a2, mask_threshold)
+        mask = _generate_detail_mask(luma, planes[0], kernel, taps, a1, a2, mask_threshold)
         if show_mask:
             return mask
         if masking_areas is None:
-            planes[0] = apply_mask(luma, planes[0], mask)
+            planes[0] = _apply_mask(luma, planes[0], mask)
         else:
-            planes[0] = apply_mask_to_area(luma, planes[0], mask, masking_areas)
-    scaled = plane_array_to_clip(planes)
+            planes[0] = _apply_mask_to_area(luma, planes[0], mask, masking_areas)
+    scaled = _plane_array_to_clip(planes)
     if denoise:
         scaled = mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma)
     return scaled
 
 
 # the following 6 functions are mostly called from inside inverse_scale
-def inverse_scale_clip_array(planes, w, h, kernel, kerneluv, taps, a1, a2, invks=True):
+def _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, b, c, invks=True):
     if hasattr(core, 'descale') and invks:
-        planes[0] = get_descale_filter(kernel, b=a1, c=a2, taps=taps)(planes[0], w, h)
+        planes[0] = get_descale_filter(kernel, b=b, c=c, taps=taps)(planes[0], width, height)
     elif kernel == 'bilinear' and hasattr(core, 'unresize') and invks:
-        planes[0] = core.unresize.Unresize(planes[0], w, h)
+        planes[0] = core.unresize.Unresize(planes[0], width, height)
     else:
-        planes[0] = core.fmtc.resample(planes[0], w, h, kernel=kernel, invks=invks, invkstaps=taps, a1=a1, a2=a2)
-    planes[1], planes[2] = [core.fmtc.resample(plane, w, h, kernel=kerneluv, sx=0.25) for plane in planes[1:]]
+        planes[0] = core.fmtc.resample(planes[0], width, height, kernel=kernel, invks=invks, invkstaps=taps, a1=b, a2=c)
+    planes[1], planes[2] = [core.fmtc.resample(plane, width, height, kernel=kerneluv, sx=0.25) for plane in planes[1:]]
     return planes
 
 
-def clip_to_plane_array(clip):
+def _clip_to_plane_array(clip):
     return [core.std.ShufflePlanes(clip, x, colorfamily=vs.GRAY) for x in range(clip.format.num_planes)]
 
 
-def plane_array_to_clip(planes, family=vs.YUV):
+def _plane_array_to_clip(planes, family=vs.YUV):
     return core.std.ShufflePlanes(clips=planes, planes=[0] * len(planes), colorfamily=family)
 
 
-def generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, a1=1 / 3, a2=1 / 3, threshold=0.05):
-    upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=a1, a2=a2)
+def _generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, b=1/3, c=1/3, threshold=0.05):
+    upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=b, a2=c)
     mask = core.std.Expr([source, upscaled], 'x y - abs') \
         .resize.Bicubic(downscaled.width, downscaled.height).std.Binarize(threshold)
     mask = iterate(mask, core.std.Maximum, 2)
     return iterate(mask, core.std.Inflate, 2)
 
 
-def apply_mask(source, scaled, mask):
+def _apply_mask(source, scaled, mask):
     noalias = core.fmtc.resample(source, scaled.width, scaled.height, kernel='blackmanminlobe', taps=5)
     return core.std.MaskedMerge(scaled, noalias, mask)
 
 
-def apply_mask_to_area(source, scaled, mask, area):
+def _apply_mask_to_area(source, scaled, mask, area):
     if len(area) == 2 and isinstance(area[0], int):
         area = [[area[0], area[1]]]
     noalias = core.fmtc.resample(source, scaled.width, scaled.height, kernel='blackmanminlobe', taps=5)
@@ -93,21 +96,21 @@ def apply_mask_to_area(source, scaled, mask, area):
         source_cut = core.std.Trim(noalias, a[0], a[1])
         scaled_cut = core.std.Trim(scaled, a[0], a[1])
         mask_cut = core.std.Trim(mask, a[0], a[1])
-        masked = apply_mask(source_cut, scaled_cut, mask_cut)
+        masked = _apply_mask(source_cut, scaled_cut, mask_cut)
         scaled = insert_clip(scaled, masked, a[0])
     return scaled
 
 
 # less typing == more time to encode
-split = clip_to_plane_array
-join = plane_array_to_clip
+split = _clip_to_plane_array
+join = _plane_array_to_clip
 
 
 def getY(c: vs.VideoNode) -> vs.VideoNode:
     return core.std.ShufflePlanes(c, 0, vs.GRAY)
 
 
-# TODO: currently, this should fail for non mod4 subsampled input.
+# Currently, this should fail for non mod4 subsampled input.
 # Not really relevant, though, as 480p, 576p, 720p, and 1080p are all mod32
 def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
     """
@@ -123,8 +126,7 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
             out_txt += "%d I -1\n" % i
         if i % 1000 == 0:
             print(i)
-    if out_path is None:
-        out_path = os.path.expanduser("~") + "/Desktop/keyframes.txt"
+    out_path = fallback(out_path, os.path.expanduser("~") + "/Desktop/keyframes.txt")
     text_file = open(out_path, "w")
     text_file.write(out_txt)
     text_file.close()
@@ -133,15 +135,15 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
 def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=12, mask_bits=8,
                    show_mask=False) -> vs.VideoNode:
     """
-    generates grain based on frame and pixel brightness.
-    details can be found here: https://kageru.moe/blog/article/adaptivegrain
-    strength is the strength of the grain generated by AddGrain, static=True for static grain
-    luma_scaling manipulates the grain alpha curve. Higher values will generate less grain (especially in brighter scenes)
-    while lower values will generate more grain, even in brighter scenes
-    Please note that 8 bit should be enough for the mask; 10, if you want to do everything in 10 bit.
-    It is technically possible to set it to up to 16 (float does not work), but you won't gain anything.
-    An 8 bit mask uses 1 MB of RAM, 10 bit need 4 MB, and 16 bit use 256 MB.
-    The initial generation time for the lookup tables will also increase.
+    Generates grain based on frame and pixel brightness. Details can be found here:
+    https://kageru.moe/blog/article/adaptivegrain
+    Strength is the strength of the grain generated by AddGrain, static=True for static grain, luma_scaling
+    manipulates the grain alpha curve. Higher values will generate less grain (especially in brighter scenes),
+    while lower values will generate more grain, even in brighter scenes. Please note that 8 bit should be
+    enough for the mask; 10, if you want to do everything in 10 bit. It is technically possible to set it to up
+    to 16 (float does not work), but you won't gain anything. An 8 bit mask uses 1 MB of RAM, 10 bit need 4 MB,
+    and 16 bit use 256 MB. The initial generation time for the lookup tables will also increase.
+
     There have been instances where depths other than 8 break the multithreading of Vapoursynth.
     If this happens to you, try switching to 8 bit.
     """
@@ -192,44 +194,45 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
 
 
 # TODO: implement blending zone in which both clips are merged to avoid abrupt and visible kernel changes.
-def conditional_resize(src: vs.VideoNode, kernel='bilinear', w=1280, h=720, thr=0.00015, debug=False) -> vs.VideoNode:
+def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=720, thr=0.00015,
+                       debug=False) -> vs.VideoNode:
     """
     Fix oversharpened upscales by comparing a regular downscale with a blurry bicubic kernel downscale.
     Similar to the avisynth function. thr is lower in vapoursynth because it's normalized (between 0 and 1)
     """
-
-    def compare(n, down, os, diff_default, diff_os):
+    def compare(n, down, oversharpened, diff_default, diff_os):
         error_default = diff_default.get_frame(n).props.PlaneStatsDiff
         error_os = diff_os.get_frame(n).props.PlaneStatsDiff
         if debug:
             debugstring = "error when scaling with {:s}: {:.5f}\nerror when scaling with bicubic (b=0, c=1): " \
-                          "{:.5f}\nUsing debicubic OS: {:s}".format(kernel, error_default, error_os,
-                                                                    str(error_default - thr > error_os))
-            os = os.sub.Subtitle(debugstring)
+                          "{:.5f}\nUsing sharp debicubic: {:s}".format(kernel, error_default, error_os,
+                                                                       str(error_default - thr > error_os))
+            oversharpened = oversharpened.sub.Subtitle(debugstring)
             down = down.sub.Subtitle(debugstring)
         if error_default - thr > error_os:
-            return os
+            return oversharpened
         return down
 
     src_w, src_h = src.width, src.height
 
     if hasattr(core, 'descale'):
-        down = get_descale_filter(kernel)(w, h)
-        os = core.descale.Debicubic(w, h, b=0, c=1)
+        down = get_descale_filter(kernel)(width, height)
+        oversharpened = core.descale.Debicubic(width, height, b=0, c=1)
     else:
-        down = src.fmtc.resample(w, h, kernel=kernel, invks=True)
-        os = src.fmtc.resample(w, h, kernel='bicubic', a1=0, a2=1, invks=True)
+        down = src.fmtc.resample(width, height, kernel=kernel, invks=True)
+        oversharpened = src.fmtc.resample(width, height, kernel='bicubic', a1=0, a2=1, invks=True)
 
     # we only need luma for the comparison
     up = core.std.ShufflePlanes([down], [0], vs.GRAY).fmtc.resample(src_w, src_h, kernel=kernel)
-    os_up = core.std.ShufflePlanes([os], [0], vs.GRAY).fmtc.resample(src_w, src_h, kernel='bicubic', a1=0, a2=1)
+    oversharpened_up = core.std.ShufflePlanes([oversharpened], [0], vs.GRAY)\
+            .fmtc.resample(src_w, src_h, kernel='bicubic', a1=0, a2=1)
 
     src_luma = core.std.ShufflePlanes([src], [0], vs.GRAY)
     diff_default = core.std.PlaneStats(up, src_luma)
-    diff_os = core.std.PlaneStats(os_up, src_luma)
+    diff_os = core.std.PlaneStats(oversharpened_up, src_luma)
 
-    return core.std.FrameEval(down,
-                              partial(compare, down=down, os=os, diff_os=diff_os, diff_default=diff_default))
+    return core.std.FrameEval(
+        down, partial(compare, down=down, oversharpened=oversharpened, diff_os=diff_os, diff_default=diff_default))
 
 
 def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offset_y: int) -> vs.VideoNode:
@@ -289,10 +292,10 @@ def kirsch(src: vs.VideoNode) -> vs.VideoNode:
     Kirsch edge detection. This uses 8 directions, so it's slower but better than Sobel (4 directions).
     more information: https://ddl.kageru.moe/konOJ.pdf
     """
-    w = [5] * 3 + [-3] * 5
-    weights = [w[-i:] + w[:-i] for i in range(4)]
-    c = [core.std.Convolution(src, (w[:4] + [0] + w[4:]), saturate=False) for w in weights]
-    return core.std.Expr(c, 'x y max z max a max')
+    weights = [5] * 3 + [-3] * 5
+    weights = [weights[-i:] + weights[:-i] for i in range(4)]
+    clip = [core.std.Convolution(src, (w[:4] + [0] + w[4:]), saturate=False) for w in weights]
+    return core.std.Expr(clip, 'x y max z max a max')
 
 
 def fast_sobel(src: vs.VideoNode) -> vs.VideoNode:
@@ -300,9 +303,9 @@ def fast_sobel(src: vs.VideoNode) -> vs.VideoNode:
     Should behave similar to std.Sobel() but faster since it has no additional high-/lowpass, gain, or the sqrt.
     The internal filter is also a little brighter
     """
-    sx = src.std.Convolution([-1, -2, -1, 0, 0, 0, 1, 2, 1], saturate=False)
-    sy = src.std.Convolution([-1, 0, 1, -2, 0, 2, -1, 0, 1], saturate=False)
-    return core.std.Expr([sx, sy], 'x y max')
+    sobel_x = src.std.Convolution([-1, -2, -1, 0, 0, 0, 1, 2, 1], saturate=False)
+    sobel_y = src.std.Convolution([-1, 0, 1, -2, 0, 2, -1, 0, 1], saturate=False)
+    return core.std.Expr([sobel_x, sobel_y], 'x y max')
 
 
 def get_descale_filter(kernel: str, **kwargs):
@@ -310,17 +313,17 @@ def get_descale_filter(kernel: str, **kwargs):
     Stolen from a declined pull request.
     Originally written by @stuxcrystal on Github.
     """
-    FILTERS = {
+    filters = {
         'bilinear': (lambda **kwargs: core.descale.Debilinear),
         'spline16': (lambda **kwargs: core.descale.Despline16),
         'spline36': (lambda **kwargs: core.descale.Despline36),
         'bicubic': (lambda b, c, **kwargs: partial(core.descale.Debicubic, b=b, c=c)),
         'lanczos': (lambda taps, **kwargs: partial(core.descale.Delanczos, taps=taps)),
     }
-    return FILTERS[kernel](**kwargs)
+    return filters[kernel](**kwargs)
 
 
-def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=None, highpass=25) -> vs.VideoNode:
+def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.VideoNode:
     """
     Uses multiple techniques to mask the hardsubs in video streams like Anime on Demand or Wakanim.
     Might (should) work for other hardsubs, too, as long as the subs are somewhat close to black/white.
@@ -333,24 +336,19 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
     Most of this code was written by Zastin (https://github.com/Z4ST1N)
     Clean code soon(tm)
     """
-
     clp_f = clip.format
     bits = clp_f.bits_per_sample
-    st = clp_f.sample_type
-    peak = 1 if st == vs.FLOAT else (1 << bits) - 1
+    stype = clp_f.sample_type
 
-    if expandN is None:
-        expandN = clip.width // 200
-    # if mode in ['default', None]:
+    expand_n = fallback(expand_n, clip.width // 200)
 
-    out_fmt = core.register_format(vs.GRAY, st, bits, 0, 0)
-    YUV_fmt = core.register_format(clp_f.color_family, vs.INTEGER, 8, clp_f.subsampling_w, clp_f.subsampling_h)
+    yuv_fmt = core.register_format(clp_f.color_family, vs.INTEGER, 8, clp_f.subsampling_w, clp_f.subsampling_h)
 
-    y_range = 219 << (bits - 8) if st == vs.INTEGER else 1
-    uv_range = 224 << (bits - 8) if st == vs.INTEGER else 1
-    offset = 16 << (bits - 8) if st == vs.INTEGER else 0
+    y_range = 219 << (bits - 8) if stype == vs.INTEGER else 1
+    uv_range = 224 << (bits - 8) if stype == vs.INTEGER else 1
+    offset = 16 << (bits - 8) if stype == vs.INTEGER else 0
 
-    uv_abs = ' abs ' if st == vs.FLOAT else ' {} - abs '.format((1 << bits) // 2)
+    uv_abs = ' abs ' if stype == vs.FLOAT else ' {} - abs '.format((1 << bits) // 2)
     yexpr = 'x y - abs {thr} > 255 0 ?'.format(thr=y_range * 0.7)
     uvexpr = 'x {uv_abs} {thr} < y {uv_abs} {thr} < and 255 0 ?'.format(uv_abs=uv_abs, thr=uv_range * 0.1)
 
@@ -365,7 +363,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
         right = core.resize.Point(clip, src_left=4)
     else:
         right = core.fmtc.resample(clip, sx=4, flt=False)
-    subedge = core.std.Expr([clip, right], [yexpr, uvexpr], YUV_fmt.id)
+    subedge = core.std.Expr([clip, right], [yexpr, uvexpr], yuv_fmt.id)
     c444 = split(subedge.resize.Bicubic(format=vs.YUV444P8, filter_param_a=0, filter_param_b=0.5))
     subedge = core.std.Expr(c444, 'x y z min min')
 
@@ -376,28 +374,13 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, mode='default', expandN=N
     diff = core.std.Expr(clips, difexpr, vs.GRAY8).std.Maximum().std.Maximum()
 
     mask = core.misc.Hysteresis(subedge, diff)
-    mask = iterate(mask, core.std.Maximum, expandN)
+    mask = iterate(mask, core.std.Maximum, expand_n)
     mask = mask.std.Inflate().std.Inflate().std.Convolution([1] * 9)
     mask = fvf.Depth(mask, bits, range=1, range_in=1)
-
-    """
-    # needs some more testing
-    elif mode == 'fast':
-        highpass = highpass << (bits - 8) if st == vs.INTEGER else highpass / 255
-        clip, ref = getY(clip), getY(ref)
-        ref = ref if clip.format == ref.format else fvf.Depth(ref, bits)
-        edge = clip.std.Sobel()
-        diff = core.std.Expr([clip, ref], 'x y - abs {:d} < 0 {:d} ?'.format(highpass, peak))
-        mask = core.misc.Hysteresis(edge, diff)
-        mask = iterate(mask, core.std.Maximum, expandN)
-        mask = mask.std.Convolution([1] * 9)
-    else:
-        raise ValueError('hardsubmask: Unknown mode')
-    """
     return mask
 
 
-def hardsubmask_fades(clip, ref, expandN=8, highpass=5000):
+def hardsubmask_fades(clip, ref, expand_n=8, highpass=5000):
     """
     Uses Sobel edge detection to find edges that are only present in the main clip.
     These should (theoretically) be the subtitles.
@@ -412,7 +395,7 @@ def hardsubmask_fades(clip, ref, expandN=8, highpass=5000):
     clipedge = getY(clip).std.Sobel()
     refedge = getY(ref).std.Sobel()
     mask = core.std.Expr([clipedge, refedge], 'x y - {} < 0 65535 ?'.format(highpass)).std.Median()
-    mask = iterate(mask, core.std.Maximum, expandN)
+    mask = iterate(mask, core.std.Maximum, expand_n)
     mask = iterate(mask, core.std.Inflate, 4)
     return mask
 
@@ -422,11 +405,9 @@ def crossfade(clipa, clipb, duration):
     Crossfade clipa into clipb. Duration is the length of the blending zone.
     For example, crossfade(a, b, 100) will fade the last 100 frames of a into b.
     """
+    def fade_image(frame_number, clipa, clipb):
+        return core.std.Merge(clipa, clipb, weight=frame_number/clipa.num_frames)
 
-    def fade_image(n, clipa, clipb):
-        return core.std.Merge(clipa, clipb, weight=n / clipa.num_frames)
-
-    # lol, >error handling
     if clipa.format.id != clipb.format.id or clipa.height != clipb.height or clipa.width != clipb.width:
         raise ValueError('Crossfade: Both clips must have the same dimensions and format.')
     fade = core.std.FrameEval(clipa[-duration:], partial(fade_image, clipa=clipa[-duration:], clipb=clipb[:duration]))
@@ -449,7 +430,7 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
 
 def insert_clip(ep, op, startframe):
     """
-    convenience function to insert things like Non-credit OP/ED into episodes
+    Convenience method to insert things like non-credit OP/ED into episodes.
     """
     if startframe == 0:
         return op + ep[op.num_frames:]
@@ -483,9 +464,9 @@ def get_subsampling(src):
     return css
 
 
-def iterate(base, filter, count):
+def iterate(base, function, count):
     for _ in range(count):
-        base = filter(base)
+        base = function(base)
     return base
 
 
@@ -496,22 +477,28 @@ def is16bit(clip):
     return clip.format.bits_per_sample == 16
 
 
-def getw(h, ar=16 / 9, only_even=True):
+def getw(height, aspect_ratio=16/9, only_even=True):
     """
-    returns width for image
+    Returns width for image.
     """
-    w = h * ar
-    w = int(round(w))
+    width = height * aspect_ratio
+    width = int(round(width))
     if only_even:
-        w = w // 2 * 2
-    return w
+        width = width // 2 * 2
+    return width
 
 
-def fit_subsampling(x, sub):
+def fit_subsampling(res, sub):
     """
     Makes a value (e.g. resolution or crop value) compatible with the specified subsampling.
     sub is given by the properties (clip.format.subsampling_w/_h)
     The number is then truncated to be a compatible resolution.
     """
-    return (x >> bits) << bits
-    # return x & (0xffffffff - 1 << sub -1);
+    return (res >> sub) << sub
+
+
+def fallback(value, fallback_value):
+    """
+    Utility function that returns a value or a fallback if the value is None.
+    """
+    return fallback_value if value is None else value
