@@ -10,9 +10,6 @@ import fvsfunc as fvf
 core = vs.core
 
 
-# TODO fixedge port
-
-
 def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
                   a1=1/3, a2=1/3, invks=True, mask_detail=False, masking_areas=None, mask_threshold=0.05,
                   show_mask=False, denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
@@ -29,14 +26,13 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
     if source.format.bits_per_sample != 32:
         # If this returns an error, make sure you're using R39 or newer
         source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
-    luma = getY(source)
+    luma = get_y(source)
     width = fallback(width, getw(height, source.width/source.height))
     if mask_threshold > 1:
         mask_threshold /= 255
     planes = _clip_to_plane_array(source)
     if denoise and use_gpu:
-        # I'd really like to use the newer versions that support processing both chroma planes in a single call,
-        # but I just can't get them to work on my system. I should probably report that as a bug at some point.
+        # TODO: new syntax
         planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
                                 for plane in planes[1:]]
     planes = _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
@@ -156,7 +152,7 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
             z = np.rint(z).astype(int)
         return z.tolist()
 
-    def generate_mask(_n, f, clip):
+    def generate_mask(n, f, clip):
         frameluma = round(f.props.PlaneStatsAverage * 999)
         table = lut[int(frameluma)]
         return core.std.Lut(clip, lut=table)
@@ -204,8 +200,6 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=
             return oversharpened
         return down
 
-    src_w, src_h = src.width, src.height
-
     if hasattr(core, 'descale'):
         down = get_descale_filter(kernel)(width, height)
         oversharpened = core.descale.Debicubic(width, height, b=0, c=1)
@@ -214,12 +208,11 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=
         oversharpened = src.fmtc.resample(width, height, kernel='bicubic', a1=0, a2=1, invks=True)
 
     # we only need luma for the comparison
-    up = core.std.ShufflePlanes([down], [0], vs.GRAY).fmtc.resample(src_w, src_h, kernel=kernel)
-    oversharpened_up = core.std.ShufflePlanes([oversharpened], [0], vs.GRAY)\
-            .fmtc.resample(src_w, src_h, kernel='bicubic', a1=0, a2=1)
+    rescaled = get_y(down).fmtc.resample(src.width, src.height, kernel=kernel)
+    oversharpened_up = get_y(oversharpened).fmtc.resample(src.width, src.height, kernel='bicubic', a1=0, a2=1)
 
-    src_luma = core.std.ShufflePlanes([src], [0], vs.GRAY)
-    diff_default = core.std.PlaneStats(up, src_luma)
+    src_luma = get_y(src)
+    diff_default = core.std.PlaneStats(rescaled, src_luma)
     diff_os = core.std.PlaneStats(oversharpened_up, src_luma)
 
     return core.std.FrameEval(
@@ -358,7 +351,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
     c444 = split(subedge.resize.Bicubic(format=vs.YUV444P8, filter_param_a=0, filter_param_b=0.5))
     subedge = core.std.Expr(c444, 'x y z min min')
 
-    clip, ref = getY(clip), getY(ref)
+    clip, ref = get_y(clip), get_y(ref)
     ref = ref if clip.format == ref.format else fvf.Depth(ref, bits)
 
     clips = [clip.std.Convolution([1] * 9), ref.std.Convolution([1] * 9)]
@@ -383,8 +376,8 @@ def hardsubmask_fades(clip, ref, expand_n=8, highpass=5000):
     """
     clip = core.fmtc.bitdepth(clip, bits=16).std.Convolution([1] * 9)
     ref = core.fmtc.bitdepth(ref, bits=16).std.Convolution([1] * 9)
-    clipedge = getY(clip).std.Sobel()
-    refedge = getY(ref).std.Sobel()
+    clipedge = get_y(clip).std.Sobel()
+    refedge = get_y(ref).std.Sobel()
     mask = core.std.Expr([clipedge, refedge], 'x y - {} < 0 65535 ?'.format(highpass)).std.Median()
     mask = iterate(mask, core.std.Maximum, expand_n)
     mask = iterate(mask, core.std.Inflate, 4)
@@ -413,7 +406,7 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
     BM3D's sigma default is 5, KNL's is 1.2, to give you an idea of the order of magnitude
     radius1 = temporal radius of luma denoising, 0 for purely spatial denoising
     """
-    y = getY(src)
+    y = get_y(src)
     y = mvf.BM3D(y, radius1=radius1, sigma=sigma)
     denoised = core.knlm.KNLMeansCL(src, a=2, h=knl, d=3, device_type='gpu', device_id=0, channels='UV')
     return core.std.ShufflePlanes([y, denoised], planes=[0, 1, 2], colorfamily=vs.YUV)
@@ -498,13 +491,29 @@ def fallback(value, fallback_value):
     return fallback_value if value is None else value
 
 
-def getY(c: vs.VideoNode) -> vs.VideoNode:
+def get_y(clip: vs.VideoNode) -> vs.VideoNode:
     """
     Helper to get the luma of a VideoNode.
     """
-    return core.std.ShufflePlanes(c, 0, vs.GRAY)
+    return core.std.ShufflePlanes(clip, 0, vs.GRAY)
 
 
-# less typing == more time to encode
-split = _clip_to_plane_array
-join = _plane_array_to_clip
+def getY(c: vs.VideoNode) -> vs.VideoNode:
+    """
+    Deprecated alias, use get_y instead
+    """
+    return get_y(c)
+
+
+def split(clip: vs.VideoNode) -> list:
+    """
+    Returns a list of planes for the given input clip.
+    """
+    return _clip_to_plane_array(clip)
+
+
+def join(planes: list) -> vs.VideoNode:
+    """
+    Joins the supplied list of planes into a YUV video node.
+    """
+    return _plane_array_to_clip(planes)
