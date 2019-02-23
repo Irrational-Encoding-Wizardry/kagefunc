@@ -101,15 +101,6 @@ def _apply_mask_to_area(source, scaled, mask, area):
     return scaled
 
 
-# less typing == more time to encode
-split = _clip_to_plane_array
-join = _plane_array_to_clip
-
-
-def getY(c: vs.VideoNode) -> vs.VideoNode:
-    return core.std.ShufflePlanes(c, 0, vs.GRAY)
-
-
 # Currently, this should fail for non mod4 subsampled input.
 # Not really relevant, though, as 480p, 576p, 720p, and 1080p are all mod32
 def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
@@ -152,11 +143,11 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
     def fill_lut(y):
         """
         Using horner's method to compute this polynomial:
-        (1 - (1.124 * x - 9.466 * x ** 2 + 36.624 * x ** 3 - 45.47 * x ** 4 + 18.188 * x ** 5)) ** ((y ** 2) * luma_scaling) * 255
+        (1 - (1.124 * x - 9.466 * x² + 36.624 * x³ - 45.47 * x⁴ + 18.188 * x⁵)) ** ((y²) * luma_scaling) * 255
         Using the normal polynomial is about 2.5x slower during the initial generation.
-        I know it doesn't matter as it only saves a few ms (or seconds at most), but god damn, just let me have some fun here, will ya?
-        Just truncating (rather than rounding) the array would also half the processing time,
-        but that would decrease the precision and is also just unnecessary.
+        I know it doesn't matter as it only saves a few ms (or seconds at most), but god damn, just let me have
+        some fun here, will ya? Just truncating (rather than rounding) the array would also half the processing
+        time, but that would decrease the precision and is also just unnecessary.
         """
         x = np.arange(0, 1, 1 / (1 << mask_bits))
         z = (1 - (x * (1.124 + x * (-9.466 + x * (36.624 + x * (-45.47 + x * 18.188)))))) ** ((y ** 2) * luma_scaling)
@@ -165,7 +156,7 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
             z = np.rint(z).astype(int)
         return z.tolist()
 
-    def generate_mask(n, f, clip):
+    def generate_mask(_n, f, clip):
         frameluma = round(f.props.PlaneStatsAverage * 999)
         table = lut[int(frameluma)]
         return core.std.Lut(clip, lut=table)
@@ -301,7 +292,7 @@ def kirsch(src: vs.VideoNode) -> vs.VideoNode:
 def fast_sobel(src: vs.VideoNode) -> vs.VideoNode:
     """
     Should behave similar to std.Sobel() but faster since it has no additional high-/lowpass, gain, or the sqrt.
-    The internal filter is also a little brighter
+    The internal filter is also a little brighter.
     """
     sobel_x = src.std.Convolution([-1, -2, -1, 0, 0, 0, 1, 2, 1], saturate=False)
     sobel_y = src.std.Convolution([-1, 0, 1, -2, 0, 2, -1, 0, 1], saturate=False)
@@ -428,17 +419,17 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
     return core.std.ShufflePlanes([y, denoised], planes=[0, 1, 2], colorfamily=vs.YUV)
 
 
-def insert_clip(ep, op, startframe):
+def insert_clip(clip, insert, start_frame):
     """
     Convenience method to insert things like non-credit OP/ED into episodes.
     """
-    if startframe == 0:
-        return op + ep[op.num_frames:]
-    pre = ep[:startframe]
-    if startframe + op.num_frames == ep.num_frames - 1:
-        return pre + op
-    post = ep[startframe + op.num_frames:]
-    return pre + op + post
+    if start_frame == 0:
+        return insert + clip[insert.num_frames:]
+    pre = clip[:start_frame]
+    if start_frame + insert.num_frames == clip.num_frames - 1:
+        return pre + insert
+    post = clip[start_frame + insert.num_frames:]
+    return pre + insert + post
 
 
 # helpers
@@ -465,6 +456,9 @@ def get_subsampling(src):
 
 
 def iterate(base, function, count):
+    """
+    Utility function that executes a given function `count` times on the input.
+    """
     for _ in range(count):
         base = function(base)
     return base
@@ -502,3 +496,15 @@ def fallback(value, fallback_value):
     Utility function that returns a value or a fallback if the value is None.
     """
     return fallback_value if value is None else value
+
+
+def getY(c: vs.VideoNode) -> vs.VideoNode:
+    """
+    Helper to get the luma of a VideoNode.
+    """
+    return core.std.ShufflePlanes(c, 0, vs.GRAY)
+
+
+# less typing == more time to encode
+split = _clip_to_plane_array
+join = _plane_array_to_clip

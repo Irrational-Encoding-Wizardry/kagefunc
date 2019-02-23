@@ -1,23 +1,26 @@
-[MASTER]
-
-# A comma-separated list of package or module names from where C extensions may
-# be loaded. Extensions are loading into the active Python interpreter and may
-# run arbitrary code.
-#extension-pkg-whitelist=vapoursynth
-
 [FORMAT]
-#
 # Maximum number of characters on a single line.
 max-line-length=120
 
 # Maximum number of lines in a module.
-max-module-lines=1000
+# We don’t limit these for vapoursynth stuff, as the functions are mostly independent and we don’t want to spam scripts with imports
+max-module-lines=999999
 
 [DESIGN]
-
 # Maximum number of arguments for function / method.
 max-args=10
 
+[BASIC]
+# resizer arguments (vapoursynth convention): b, c, a1, a2
+# polynomial math: x, y, z
+# default names inside frameeval: f, n1
+# well-known shorthands for opening/ending: op, ed
+# standard iterators: i, j
+good-names=b,c,a1,a2,x,y,z,f,n,op,ed,i,j
+
+# follows vapoursynth convention
+const-naming-style=snake_case
+
 [MESSAGES CONTROL]
-# vapoursynth stuff seems broken
+# vapoursynth stuff seems broken otherwise
 disable=c-extension-no-member
