@@ -412,6 +412,8 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
     return core.std.ShufflePlanes([y, denoised], planes=[0, 1, 2], colorfamily=vs.YUV)
 
 
+# helpers
+
 def insert_clip(clip, insert, start_frame):
     """
     Convenience method to insert things like non-credit OP/ED into episodes.
@@ -419,13 +421,14 @@ def insert_clip(clip, insert, start_frame):
     if start_frame == 0:
         return insert + clip[insert.num_frames:]
     pre = clip[:start_frame]
-    if start_frame + insert.num_frames == clip.num_frames - 1:
+    frame_after_insert = start_frame + insert.num_frames
+    if frame_after_insert > clip.num_frames:
+        raise ValueError('Inserted clip is too long')
+    if frame_after_insert == clip.num_frames:
         return pre + insert
     post = clip[start_frame + insert.num_frames:]
     return pre + insert + post
 
-
-# helpers
 
 def get_subsampling(src):
     """
