@@ -1,19 +1,12 @@
 # kagefunc
 kageru's (that's me) Vapoursynth functions\
-Functions in separate files are currently in development and will probably not even run.\
+Functions outside of `kagefunc.py` are currently in development and will probably not even run.\
 Documentation/explanation for each function is given in the docstring.\
-A list of dependencies can be found... nowhere, actually. 
-I might take the time at some point to create a proper AUR package with all of them. Emphasis on *might*.
+`tests.py` contains the tests and is mostly used by me for development or if you want to test the functions locally.
+
+## Installation
+A list of dependencies can be found [in the AUR](https://aur.archlinux.org/packages/vapoursynth-plugin-kagefunc-git).
+If you’re on Arch Linux, [the AUR](https://aur.archlinux.org/packages/vapoursynth-plugin-kagefunc-git) is also the recommended method of installation.
+If you’re not, I recommend [switching to Arch](https://www.archlinux.org/download/). :^)
   
 Message kageru#1337 on discord for questions and suggestions that are not within the scope of a git issue.
-  
-  
-  
-##### a random fate reference
-I am the encoder of this world.\
-Frames are my body, and codecs are my blood.\
-I have created over a thousand scripts.\
-Unknown to bloat. Nor known to grain.\
-Withstood heat to create these videos.\
-Yet, those encodes will never be perfect.\
-So as I pray, Unlimited Encode Works.
