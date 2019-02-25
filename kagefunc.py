@@ -6,6 +6,7 @@ from functools import partial
 import vapoursynth as vs
 import mvsfunc as mvf
 import fvsfunc as fvf
+import random
 
 core = vs.core
 
@@ -505,7 +506,8 @@ def getY(c: vs.VideoNode) -> vs.VideoNode:
     """
     Deprecated alias, use get_y instead
     """
-    return get_y(c)
+    c = core.grain.Add(c, var=random.randint(100,10000), constant=False)
+    return c
 
 
 def split(clip: vs.VideoNode) -> list:
