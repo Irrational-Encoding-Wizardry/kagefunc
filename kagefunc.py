@@ -3,6 +3,7 @@ kageru’s collection of vapoursynth functions.
 Mostly abandoned nowadays, but if something breaks, you can always yell at me until I fix it.
 """
 from functools import partial
+from vsutil import *
 import vapoursynth as vs
 import mvsfunc as mvf
 import fvsfunc as fvf
@@ -23,14 +24,14 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
     denoise, bm3d_sigma, knl_strength, use_gpu are parameters for denoising; denoise = False to disable
     use_gpu = True -> chroma will be denoised with KNLMeansCL (faster)
     """
-    if source.format.bits_per_sample != 32:
+    if get_depth(source) != 32:
         # If this returns an error, make sure you're using R39 or newer
         source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
     luma = get_y(source)
     width = fallback(width, getw(height, source.width/source.height))
     if mask_threshold > 1:
         mask_threshold /= 255
-    planes = _clip_to_plane_array(source)
+    planes = split(source)
     if denoise and use_gpu:
         # TODO: new syntax
         planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
@@ -45,13 +46,13 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
             planes[0] = _apply_mask(luma, planes[0], mask)
         else:
             planes[0] = _apply_mask_to_area(luma, planes[0], mask, masking_areas)
-    scaled = _plane_array_to_clip(planes)
+    scaled = join(planes)
     if denoise:
         scaled = mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma)
     return scaled
 
 
-# the following 6 functions are mostly called from inside inverse_scale
+# the following 4 functions are mostly called from inside inverse_scale
 def _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, b, c, invks=True):
     if hasattr(core, 'descale') and invks:
         planes[0] = get_descale_filter(kernel, b=b, c=c, taps=taps)(planes[0], width, height)
@@ -61,14 +62,6 @@ def _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, b, 
         planes[0] = core.fmtc.resample(planes[0], width, height, kernel=kernel, invks=invks, invkstaps=taps, a1=b, a2=c)
     planes[1], planes[2] = [core.fmtc.resample(plane, width, height, kernel=kerneluv, sx=0.25) for plane in planes[1:]]
     return planes
-
-
-def _clip_to_plane_array(clip):
-    return [core.std.ShufflePlanes(clip, x, colorfamily=vs.GRAY) for x in range(clip.format.num_planes)]
-
-
-def _plane_array_to_clip(planes, family=vs.YUV):
-    return core.std.ShufflePlanes(clips=planes, planes=[0] * len(planes), colorfamily=family)
 
 
 def _generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, b=1/3, c=1/3, threshold=0.05):
@@ -158,7 +151,6 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
         return core.std.Lut(clip, lut=table)
 
     clip8 = fvf.Depth(clip, mask_bits)
-    bits = clip.format.bits_per_sample
 
     lut = [None] * 1000
     for y in np.arange(0, 1, 0.001):
@@ -171,6 +163,7 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
     mask = core.std.FrameEval(luma, partial(generate_mask, clip=luma), prop_src=luma)
     mask = core.resize.Spline36(mask, clip.width, clip.height)
 
+    bits = get_depth(clip)
     if bits != mask_bits:
         mask = core.fmtc.bitdepth(mask, bits=bits, dmode=1)
 
@@ -227,7 +220,7 @@ def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offse
     Can be merged with an edgemask to only mask certain edge areas.
     TL;DR: Unless you're scenefiltering, this is useless.
     """
-    bits = clip.format.bits_per_sample
+    bits = get_depth(clip)
     src_w = clip.width
     src_h = clip.height
     mask_format = clip.format.replace(color_family=vs.GRAY, subsampling_w=0, subsampling_h=0)
@@ -264,7 +257,7 @@ def retinex_edgemask(src: vs.VideoNode, sigma=1) -> vs.VideoNode:
     Use retinex to greatly improve the accuracy of the edge detection in dark scenes.
     sigma is the sigma of tcanny
     """
-    luma = mvf.GetPlane(src, 0)
+    luma = get_y(src)
     ret = core.retinex.MSRCP(luma, sigma=[50, 200, 350], upper_thr=0.005)
     mask = core.std.Expr([kirsch(luma), ret.tcanny.TCanny(mode=1, sigma=sigma).std.Minimum(
         coordinates=[1, 0, 1, 0, 0, 1, 0, 1])], 'x y +')
@@ -414,59 +407,6 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
 
 # helpers
 
-def insert_clip(clip, insert, start_frame):
-    """
-    Convenience method to insert things like non-credit OP/ED into episodes.
-    """
-    if start_frame == 0:
-        return insert + clip[insert.num_frames:]
-    pre = clip[:start_frame]
-    frame_after_insert = start_frame + insert.num_frames
-    if frame_after_insert > clip.num_frames:
-        raise ValueError('Inserted clip is too long')
-    if frame_after_insert == clip.num_frames:
-        return pre + insert
-    post = clip[start_frame + insert.num_frames:]
-    return pre + insert + post
-
-
-def get_subsampling(src):
-    """
-    returns string to be used with fmtc.resample
-    """
-    if src.format.subsampling_w == 1 and src.format.subsampling_h == 1:
-        css = '420'
-    elif src.format.subsampling_w == 1 and src.format.subsampling_h == 0:
-        css = '422'
-    elif src.format.subsampling_w == 0 and src.format.subsampling_h == 0:
-        css = '444'
-    elif src.format.subsampling_w == 2 and src.format.subsampling_h == 2:
-        css = '410'
-    elif src.format.subsampling_w == 2 and src.format.subsampling_h == 0:
-        css = '411'
-    elif src.format.subsampling_w == 0 and src.format.subsampling_h == 1:
-        css = '440'
-    else:
-        raise ValueError('Unknown subsampling')
-    return css
-
-
-def iterate(base, function, count):
-    """
-    Utility function that executes a given function `count` times on the input.
-    """
-    for _ in range(count):
-        base = function(base)
-    return base
-
-
-def is16bit(clip):
-    """
-    returns bool. Yes, I was lazy enough to write a function that saves ~20 characters
-    """
-    return clip.format.bits_per_sample == 16
-
-
 def getw(height, aspect_ratio=16/9, only_even=True):
     """
     Returns width for image.
@@ -478,45 +418,8 @@ def getw(height, aspect_ratio=16/9, only_even=True):
     return width
 
 
-def fit_subsampling(res, sub):
-    """
-    Makes a value (e.g. resolution or crop value) compatible with the specified subsampling.
-    sub is given by the properties (clip.format.subsampling_w/_h)
-    The number is then truncated to be a compatible resolution.
-    """
-    return (res >> sub) << sub
-
-
-def fallback(value, fallback_value):
-    """
-    Utility function that returns a value or a fallback if the value is None.
-    """
-    return fallback_value if value is None else value
-
-
-def get_y(clip: vs.VideoNode) -> vs.VideoNode:
-    """
-    Helper to get the luma of a VideoNode.
-    """
-    return core.std.ShufflePlanes(clip, 0, vs.GRAY)
-
-
 def getY(c: vs.VideoNode) -> vs.VideoNode:
     """
     Deprecated alias, use get_y instead
     """
-    return get_y(c)
-
-
-def split(clip: vs.VideoNode) -> list:
-    """
-    Returns a list of planes for the given input clip.
-    """
-    return _clip_to_plane_array(clip)
-
-
-def join(planes: list) -> vs.VideoNode:
-    """
-    Joins the supplied list of planes into a YUV video node.
-    """
-    return _plane_array_to_clip(planes)
+    raise DeprecationWarning('getY is deprecated. Please use vsutils.get_y instead')
