@@ -154,7 +154,7 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
     mask = core.resize.Spline36(mask, clip.width, clip.height)
 
     if get_depth(clip) != 8:
-        mask = fvf.Depth(mask, bits=bits, dmode=1)
+        mask = fvf.Depth(mask, bits=get_depth(clip))
     if show_mask:
         return mask
 
