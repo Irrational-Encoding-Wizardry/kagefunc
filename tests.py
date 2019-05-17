@@ -29,7 +29,7 @@ class KagefuncTests(unittest.TestCase):
         self.assertEqual(resized.width, 120)
         self.assert_runs(kgf.inverse_scale(src, height=90, denoise=True))
         self.assert_runs(kgf.inverse_scale(src, height=90, mask_detail=True))
-        self.assert_runs(kgf.inverse_scale(src, height=90, masking_areas=[1, 2], mask_detail=True))
+        self.assert_runs(kgf.inverse_scale(src, height=90, descale_mask_zones='[0, 4]', mask_detail=True))
         resized.get_frame(0)
 
     def test_squaremask(self):

@@ -11,75 +11,54 @@ core = vs.core
 
 
 def inverse_scale(source: vs.VideoNode, width: int = None, height: int = 0, kernel: str = 'bilinear', taps: int = 4,
-                  a1: float = 1 / 3, a2: float = 1 / 3, mask_detail: bool = False, masking_areas: list = None,
-                  mask_threshold: float = 0.05, show_mask: bool = False, denoise: bool = False, bm3d_sigma: float = 1,
-                  knl_strength: float = 0.4, use_gpu: bool = True) -> vs.VideoNode:
+                  b: float = 1 / 3, c: float = 1 / 3, mask_detail: bool = False, descale_mask_zones: str = '',
+                  denoise: bool = False, bm3d_sigma: float = 1, knl_strength: float = 0.4, use_gpu: bool = True) \
+        -> vs.VideoNode:
     """
-    source = input clip
+    Use descale to reverse the scaling on a given input clip.
     width, height, kernel, taps, a1, a2 are parameters for resizing.
-    mask_detail, masking_areas, mask_threshold are parameters for masking; mask_detail = False to disable.
-    masking_areas takes frame tuples to define areas which will be masked (e.g. opening and ending)
-    masking_areas = [[1000, 2500], [30000, 32000]]. Start and end frame are inclusive.
-    mask_threshold is the binarization threshold. Value must be normalized for floats (0-1) or an 8-bit integer.
+    descale_mask_zones can be used to only mask certain zones to improve performance; uses rfs syntax.
     denoise, bm3d_sigma, knl_strength, use_gpu are parameters for denoising; denoise = False to disable
     use_gpu = True -> chroma will be denoised with KNLMeansCL (faster)
     """
+    if not height:
+        raise ValueError('inverse_scale: you need to specify a value for the output height')
+
     if get_depth(source) != 32:
         source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
-    luma = get_y(source)
     width = fallback(width, getw(height, source.width / source.height))
-    if mask_threshold > 1:
-        mask_threshold /= 256
+
+    # if we denoise luma and chroma separately, do the chroma here while it’s still 540p
     if denoise and use_gpu:
         source = core.knlm.KNLMeansCL(source, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0, channels='UV')
-    planes = split(source)
-    planes = _descale_planes(planes, width, height, kernel, taps, a1, a2)
 
+    planes = _descale_planes(split(source), width, height, kernel, taps, b, c)
     if mask_detail:
-        mask = _generate_detail_mask(luma, planes[0], kernel, taps, a1, a2, mask_threshold)
-        if show_mask:
-            return mask
-        if masking_areas is None:
-            planes[0] = _apply_mask(luma, planes[0], mask)
-        else:
-            planes[0] = _apply_mask_to_area(luma, planes[0], mask, masking_areas)
+        planes[0] = mask_descale(get_y(source), planes[0], kernel, taps, b, c, zones=descale_mask_zones)
     scaled = join(planes)
-    if denoise:
-        scaled = mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma)
-    return scaled
+    return mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma) if denoise else scaled
 
 
-# the following 4 functions are mostly called from inside inverse_scale
 def _descale_planes(planes, width, height, kernel, taps, b, c):
     planes[0] = get_descale_filter(kernel, b=b, c=c, taps=taps)(planes[0], width, height)
     planes[1], planes[2] = [core.resize.Bicubic(plane, width, height, src_left=0.25) for plane in planes[1:]]
     return planes
 
 
-def _generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, b=1 / 3, c=1 / 3, threshold=0.05):
+def mask_descale(original: vs.VideoNode, descaled: vs.VideoNode, kernel: str = 'bicubic', taps: int = 4,
+                 b: float = 1 / 3, c: float = 1 / 3, threshold: float = 0.05, zones: str = ''):
+    downscaled = core.resize.Spline36(original, descaled.width, descaled.height)
+    detail_mask = _generate_descale_mask(original, descaled, kernel, taps, b, c, threshold)
+    merged = core.std.MaskedMerge(descaled, downscaled, detail_mask)
+    return fvf.ReplaceFrames(descaled, merged, zones) if zones else merged
+
+
+def _generate_descale_mask(source, downscaled, kernel='bicubic', taps=4, b=1 / 3, c=1 / 3, threshold=0.05):
     upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=b, a2=c)
     mask = core.std.Expr([source, upscaled], 'x y - abs') \
         .resize.Bicubic(downscaled.width, downscaled.height).std.Binarize(threshold)
     mask = iterate(mask, core.std.Maximum, 2)
     return iterate(mask, core.std.Inflate, 2)
-
-
-def _apply_mask(source, scaled, mask):
-    noalias = core.fmtc.resample(source, scaled.width, scaled.height, kernel='blackmanminlobe', taps=5)
-    return core.std.MaskedMerge(scaled, noalias, mask)
-
-
-def _apply_mask_to_area(source, scaled, mask, area):
-    if len(area) == 2 and isinstance(area[0], int):
-        area = [[area[0], area[1]]]
-    noalias = core.fmtc.resample(source, scaled.width, scaled.height, kernel='blackmanminlobe', taps=5)
-    for a in area:  # TODO: use ReplaceFrames
-        source_cut = core.std.Trim(noalias, a[0], a[1])
-        scaled_cut = core.std.Trim(scaled, a[0], a[1])
-        mask_cut = core.std.Trim(mask, a[0], a[1])
-        masked = _apply_mask(source_cut, scaled_cut, mask_cut)
-        scaled = insert_clip(scaled, masked, a[0])
-    return scaled
 
 
 # Currently, this should fail for non mod4 subsampled input.
