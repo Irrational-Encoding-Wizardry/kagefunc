@@ -1,6 +1,5 @@
 """
 kageru’s collection of vapoursynth functions.
-Mostly abandoned nowadays, but if something breaks, you can always yell at me until I fix it.
 """
 from functools import partial
 from vsutil import *
@@ -11,9 +10,10 @@ import fvsfunc as fvf
 core = vs.core
 
 
-def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear', kerneluv='blackman', taps=4,
-                  a1=1/3, a2=1/3, invks=True, mask_detail=False, masking_areas=None, mask_threshold=0.05,
-                  show_mask=False, denoise=False, bm3d_sigma=1, knl_strength=0.4, use_gpu=True) -> vs.VideoNode:
+def inverse_scale(source: vs.VideoNode, width: int = None, height: int = 0, kernel: str = 'bilinear', taps: int = 4,
+                  a1: float = 1 / 3, a2: float = 1 / 3, mask_detail: bool = False, masking_areas: list = None,
+                  mask_threshold: float = 0.05, show_mask: bool = False, denoise: bool = False, bm3d_sigma: float = 1,
+                  knl_strength: float = 0.4, use_gpu: bool = True) -> vs.VideoNode:
     """
     source = input clip
     width, height, kernel, taps, a1, a2 are parameters for resizing.
@@ -25,18 +25,15 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
     use_gpu = True -> chroma will be denoised with KNLMeansCL (faster)
     """
     if get_depth(source) != 32:
-        # If this returns an error, make sure you're using R39 or newer
         source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
     luma = get_y(source)
-    width = fallback(width, getw(height, source.width/source.height))
+    width = fallback(width, getw(height, source.width / source.height))
     if mask_threshold > 1:
-        mask_threshold /= 255
-    planes = split(source)
+        mask_threshold /= 256
     if denoise and use_gpu:
-        # TODO: new syntax
-        planes[1], planes[2] = [core.knlm.KNLMeansCL(plane, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0)
-                                for plane in planes[1:]]
-    planes = _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, a1, a2, invks)
+        source = core.knlm.KNLMeansCL(source, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0, channels='UV')
+    planes = split(source)
+    planes = _descale_planes(planes, width, height, kernel, taps, a1, a2)
 
     if mask_detail:
         mask = _generate_detail_mask(luma, planes[0], kernel, taps, a1, a2, mask_threshold)
@@ -53,18 +50,13 @@ def inverse_scale(source: vs.VideoNode, width=None, height=720, kernel='bilinear
 
 
 # the following 4 functions are mostly called from inside inverse_scale
-def _inverse_scale_clip_array(planes, width, height, kernel, kerneluv, taps, b, c, invks=True):
-    if hasattr(core, 'descale') and invks:
-        planes[0] = get_descale_filter(kernel, b=b, c=c, taps=taps)(planes[0], width, height)
-    elif kernel == 'bilinear' and hasattr(core, 'unresize') and invks:
-        planes[0] = core.unresize.Unresize(planes[0], width, height)
-    else:
-        planes[0] = core.fmtc.resample(planes[0], width, height, kernel=kernel, invks=invks, invkstaps=taps, a1=b, a2=c)
-    planes[1], planes[2] = [core.fmtc.resample(plane, width, height, kernel=kerneluv, sx=0.25) for plane in planes[1:]]
+def _descale_planes(planes, width, height, kernel, taps, b, c):
+    planes[0] = get_descale_filter(kernel, b=b, c=c, taps=taps)(planes[0], width, height)
+    planes[1], planes[2] = [core.resize.Bicubic(plane, width, height, src_left=0.25) for plane in planes[1:]]
     return planes
 
 
-def _generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, b=1/3, c=1/3, threshold=0.05):
+def _generate_detail_mask(source, downscaled, kernel='bicubic', taps=4, b=1 / 3, c=1 / 3, threshold=0.05):
     upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=b, a2=c)
     mask = core.std.Expr([source, upscaled], 'x y - abs') \
         .resize.Bicubic(downscaled.width, downscaled.height).std.Binarize(threshold)
@@ -168,6 +160,7 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=
     Fix oversharpened upscales by comparing a regular downscale with a blurry bicubic kernel downscale.
     Similar to the avisynth function. thr is lower in vapoursynth because it's normalized (between 0 and 1)
     """
+
     def compare(n, down, oversharpened, diff_default, diff_os):
         error_default = diff_default.get_frame(n).props.PlaneStatsDiff
         error_os = diff_os.get_frame(n).props.PlaneStatsDiff
@@ -370,8 +363,9 @@ def crossfade(clipa, clipb, duration):
     Crossfade clipa into clipb. Duration is the length of the blending zone.
     For example, crossfade(a, b, 100) will fade the last 100 frames of a into b.
     """
+
     def fade_image(frame_number, clipa, clipb):
-        return core.std.Merge(clipa, clipb, weight=frame_number/clipa.num_frames)
+        return core.std.Merge(clipa, clipb, weight=frame_number / clipa.num_frames)
 
     if clipa.format.id != clipb.format.id or clipa.height != clipb.height or clipa.width != clipb.width:
         raise ValueError('Crossfade: Both clips must have the same dimensions and format.')
@@ -395,7 +389,7 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
 
 # helpers
 
-def getw(height, aspect_ratio=16/9, only_even=True):
+def getw(height, aspect_ratio=16 / 9, only_even=True):
     """
     Returns width for image.
     """
