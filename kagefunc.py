@@ -194,11 +194,7 @@ def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offse
     src_w = clip.width
     src_h = clip.height
     mask_format = clip.format.replace(color_family=vs.GRAY, subsampling_w=0, subsampling_h=0)
-
-    if mask_format.sample_type == vs.FLOAT:
-        white = 1
-    else:
-        white = (1 << bits) - 1
+    white = 1 if mask_format.sample_type == vs.FLOAT else (1 << bits) - 1
 
     center = core.std.BlankClip(width=width, height=height, _format=mask_format, color=white,
                                 length=clip.num_frames, fpsnum=clip.fps.numerator, fpsden=clip.fps.denominator)
@@ -229,9 +225,8 @@ def retinex_edgemask(src: vs.VideoNode, sigma=1) -> vs.VideoNode:
     """
     luma = get_y(src)
     ret = core.retinex.MSRCP(luma, sigma=[50, 200, 350], upper_thr=0.005)
-    mask = core.std.Expr([kirsch(luma), ret.tcanny.TCanny(mode=1, sigma=sigma).std.Minimum(
+    return core.std.Expr([kirsch(luma), ret.tcanny.TCanny(mode=1, sigma=sigma).std.Minimum(
         coordinates=[1, 0, 1, 0, 0, 1, 0, 1])], 'x y +')
-    return mask
 
 
 def kirsch(src: vs.VideoNode) -> vs.VideoNode:
@@ -243,16 +238,6 @@ def kirsch(src: vs.VideoNode) -> vs.VideoNode:
     weights = [weights[-i:] + weights[:-i] for i in range(4)]
     clip = [core.std.Convolution(src, (w[:4] + [0] + w[4:]), saturate=False) for w in weights]
     return core.std.Expr(clip, 'x y max z max a max')
-
-
-def fast_sobel(src: vs.VideoNode) -> vs.VideoNode:
-    """
-    Should behave similar to std.Sobel() but faster since it has no additional high-/lowpass, gain, or the sqrt.
-    The internal filter is also a little brighter.
-    """
-    sobel_x = src.std.Convolution([-1, -2, -1, 0, 0, 0, 1, 2, 1], saturate=False)
-    sobel_y = src.std.Convolution([-1, 0, 1, -2, 0, 2, -1, 0, 1], saturate=False)
-    return core.std.Expr([sobel_x, sobel_y], 'x y max')
 
 
 def get_descale_filter(kernel: str, **kwargs):
@@ -323,8 +308,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
     mask = core.misc.Hysteresis(subedge, diff)
     mask = iterate(mask, core.std.Maximum, expand_n)
     mask = mask.std.Inflate().std.Inflate().std.Convolution([1] * 9)
-    mask = fvf.Depth(mask, bits, range=1, range_in=1)
-    return mask
+    return fvf.Depth(mask, bits, range=1, range_in=1)
 
 
 def hardsubmask_fades(clip, ref, expand_n=8, highpass=5000):
@@ -343,8 +327,7 @@ def hardsubmask_fades(clip, ref, expand_n=8, highpass=5000):
     refedge = get_y(ref).std.Sobel()
     mask = core.std.Expr([clipedge, refedge], 'x y - {} < 0 65535 ?'.format(highpass)).std.Median()
     mask = iterate(mask, core.std.Maximum, expand_n)
-    mask = iterate(mask, core.std.Inflate, 4)
-    return mask
+    return iterate(mask, core.std.Inflate, 4)
 
 
 def crossfade(clipa, clipb, duration):
@@ -384,13 +367,4 @@ def getw(height, aspect_ratio=16 / 9, only_even=True):
     """
     width = height * aspect_ratio
     width = int(round(width))
-    if only_even:
-        width = width // 2 * 2
-    return width
-
-
-def getY(c: vs.VideoNode) -> vs.VideoNode:
-    """
-    Deprecated alias, use get_y instead
-    """
-    raise DeprecationWarning('getY is deprecated. Please use vsutils.get_y instead')
+    return width // 2 * 2 if only_even else width
