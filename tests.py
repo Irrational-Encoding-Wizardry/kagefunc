@@ -12,6 +12,7 @@ class KagefuncTests(unittest.TestCase):
                                               length=100)
     WHITE_SAMPLE_CLIP = vs.core.std.BlankClip(_format=vs.YUV420P8, width=160, height=120, color=[255, 128, 128],
                                               length=100)
+    GREYSCALE_SAMPLE_CLIP = vs.core.std.BlankClip(_format=vs.GRAY8, width=160, height=120, color=[255])
 
     def test_retinex_edgemask(self):
         mask = kgf.retinex_edgemask(self.BLACK_SAMPLE_CLIP)
@@ -23,6 +24,10 @@ class KagefuncTests(unittest.TestCase):
 
     def test_inverse_scale(self):
         src = self.BLACK_SAMPLE_CLIP
+        resized = kgf.inverse_scale(self.GREYSCALE_SAMPLE_CLIP, height=90)
+        self.assertEqual(resized.format.id, vs.GRAYS)
+        self.assertEqual(resized.height, 90)
+        self.assertEqual(resized.width, 120)
         resized = kgf.inverse_scale(src, height=90)
         self.assertEqual(resized.format.id, vs.YUV444PS)
         self.assertEqual(resized.height, 90)

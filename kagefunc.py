@@ -24,23 +24,33 @@ def inverse_scale(source: vs.VideoNode, width: int = None, height: int = 0, kern
     if not height:
         raise ValueError('inverse_scale: you need to specify a value for the output height')
 
+    only_luma = source.format.num_planes == 1
+
     if get_depth(source) != 32:
         source = source.resize.Point(format=source.format.replace(bits_per_sample=32, sample_type=vs.FLOAT))
     width = fallback(width, getw(height, source.width / source.height))
 
     # if we denoise luma and chroma separately, do the chroma here while it’s still 540p
-    if denoise and use_gpu:
+    if denoise and use_gpu and not only_luma:
         source = core.knlm.KNLMeansCL(source, a=2, h=knl_strength, d=3, device_type='gpu', device_id=0, channels='UV')
 
-    planes = _descale_planes(split(source), width, height, kernel, taps, b, c)
+    planes = split(source)
+    planes[0] = _descale_luma(planes[0], width, height, kernel, taps, b, c)
+    if only_luma:
+        return planes[0]
+    planes = _descale_chroma(planes, width, height)
+
     if mask_detail:
         planes[0] = mask_descale(get_y(source), planes[0], kernel, taps, b, c, zones=descale_mask_zones)
     scaled = join(planes)
     return mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma) if denoise else scaled
 
 
-def _descale_planes(planes, width, height, kernel, taps, b, c):
-    planes[0] = get_descale_filter(kernel, b=b, c=c, taps=taps)(planes[0], width, height)
+def _descale_luma(luma, width, height, kernel, taps, b, c):
+    return get_descale_filter(kernel, b=b, c=c, taps=taps)(luma, width, height)
+
+
+def _descale_chroma(planes, width, height):
     planes[1], planes[2] = [core.resize.Bicubic(plane, width, height, src_left=0.25) for plane in planes[1:]]
     return planes
 
