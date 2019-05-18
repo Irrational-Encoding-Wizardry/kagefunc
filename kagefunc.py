@@ -196,8 +196,7 @@ def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offse
     mask_format = clip.format.replace(color_family=vs.GRAY, subsampling_w=0, subsampling_h=0)
     white = 1 if mask_format.sample_type == vs.FLOAT else (1 << bits) - 1
 
-    center = core.std.BlankClip(width=width, height=height, _format=mask_format, color=white,
-                                length=clip.num_frames, fpsnum=clip.fps.numerator, fpsden=clip.fps.denominator)
+    center = core.std.BlankClip(clip, width=width, height=height, _format=mask_format, color=white, length=1)
 
     if offset_x:
         left = core.std.BlankClip(center, width=offset_x, height=height, color=0)
@@ -215,7 +214,7 @@ def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offse
         bottom = core.std.BlankClip(center, width=src_w, height=src_h - center.height, color=0)
         center = core.std.StackVertical([center, bottom])
 
-    return center
+    return center * clip.num_frames
 
 
 def retinex_edgemask(src: vs.VideoNode, sigma=1) -> vs.VideoNode:
