@@ -41,7 +41,8 @@ def inverse_scale(source: vs.VideoNode, width: int = None, height: int = 0, kern
     planes = _descale_chroma(planes, width, height)
 
     if mask_detail:
-        planes[0] = mask_descale(get_y(source), planes[0], kernel, taps, b, c, zones=descale_mask_zones)
+        upscaled = fvf.Resize(planes[0], source.width, source.height, kernel=kernel, taps=taps, a1=b, a2=c)
+        planes[0] = mask_descale(get_y(source), planes[0], upscaled, zones=descale_mask_zones)
     scaled = join(planes)
     return mvf.BM3D(scaled, radius1=1, sigma=[bm3d_sigma, 0] if use_gpu else bm3d_sigma) if denoise else scaled
 
@@ -55,16 +56,18 @@ def _descale_chroma(planes, width, height):
     return planes
 
 
-def mask_descale(original: vs.VideoNode, descaled: vs.VideoNode, kernel: str = 'bicubic', taps: int = 4,
-                 b: float = 1 / 3, c: float = 1 / 3, threshold: float = 0.05, zones: str = ''):
+def mask_descale(original: vs.VideoNode, descaled: vs.VideoNode, upscaled: vs.VideoNode,
+                 threshold: float = 0.05, zones: str = '', debug: bool = False):
     downscaled = core.resize.Spline36(original, descaled.width, descaled.height)
-    detail_mask = _generate_descale_mask(original, descaled, kernel, taps, b, c, threshold)
+    assert get_depth(original) == get_depth(descaled), "Source and descaled clip need to have the same bitdepth"
+    detail_mask = _generate_descale_mask(original, descaled, upscaled)
+    if debug:
+        return detail_mask
     merged = core.std.MaskedMerge(descaled, downscaled, detail_mask)
     return fvf.ReplaceFrames(descaled, merged, zones) if zones else merged
 
 
-def _generate_descale_mask(source, downscaled, kernel='bicubic', taps=4, b=1 / 3, c=1 / 3, threshold=0.05):
-    upscaled = fvf.Resize(downscaled, source.width, source.height, kernel=kernel, taps=taps, a1=b, a2=c)
+def _generate_descale_mask(source, downscaled, upscaled, threshold=0.05):
     mask = core.std.Expr([source, upscaled], 'x y - abs') \
         .resize.Bicubic(downscaled.width, downscaled.height).std.Binarize(threshold)
     mask = iterate(mask, core.std.Maximum, 2)
