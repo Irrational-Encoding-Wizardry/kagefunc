@@ -338,7 +338,7 @@ def crossfade(clipa, clipb, duration):
     For example, crossfade(a, b, 100) will fade the last 100 frames of a into b.
     """
 
-    def fade_image(frame_number, clipa, clipb):
+    def fade_image(n, clipa, clipb):
         return core.std.Merge(clipa, clipb, weight=frame_number / clipa.num_frames)
 
     if clipa.format.id != clipb.format.id or clipa.height != clipb.height or clipa.width != clipb.width:
