@@ -44,6 +44,12 @@ class KagefuncTests(unittest.TestCase):
         self.assert_same_dimensions(mask, self.BLACK_SAMPLE_CLIP)
         mask.get_frame(0)
 
+    def test_crossfade(self):
+        faded = kgf.crossfade(self.WHITE_SAMPLE_CLIP, self.BLACK_SAMPLE_CLIP, 1)
+        # this isn’t exactly 0.5 because… reasons?
+        self.assertLess(abs(faded.std.PlaneStats().get_frame(len(self.WHITE_SAMPLE_CLIP)-1).props.PlaneStatsAverage - 0.5), 0.02)
+        self.assertEqual(len(faded), len(self.WHITE_SAMPLE_CLIP) + len(self.BLACK_SAMPLE_CLIP) - 1)
+
     def test_adaptive_grain(self):
         grained = kgf.adaptive_grain(self.BLACK_SAMPLE_CLIP)
         self.assert_same_metadata(grained, self.BLACK_SAMPLE_CLIP)

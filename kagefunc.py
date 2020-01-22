@@ -339,12 +339,12 @@ def crossfade(clipa, clipb, duration):
     """
 
     def fade_image(n, clipa, clipb):
-        return core.std.Merge(clipa, clipb, weight=frame_number / clipa.num_frames)
+        return core.std.Merge(clipa, clipb, weight=n / clipa.num_frames)
 
     if clipa.format.id != clipb.format.id or clipa.height != clipb.height or clipa.width != clipb.width:
         raise ValueError('Crossfade: Both clips must have the same dimensions and format.')
-    fade = core.std.FrameEval(clipa[-duration:], partial(fade_image, clipa=clipa[-duration:], clipb=clipb[:duration]))
-    return clipa[:-duration] + fade + clipb[duration:]
+    fade = core.std.FrameEval(core.std.BlankClip(clipa, length=duration+1), partial(fade_image, clipa=clipa[-duration-1:], clipb=clipb[:duration]))
+    return clipa[:-duration] + fade[1:] + clipb[duration:]
 
 
 def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
