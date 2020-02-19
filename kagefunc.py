@@ -104,39 +104,8 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
     manipulates the grain alpha curve. Higher values will generate less grain (especially in brighter scenes),
     while lower values will generate more grain, even in brighter scenes.
     """
-    import numpy as np
-
-    def fill_lut(y):
-        """
-        Using horner's method to compute this polynomial:
-        (1 - (1.124 * x - 9.466 * x² + 36.624 * x³ - 45.47 * x⁴ + 18.188 * x⁵)) ** ((y²) * luma_scaling) * 255
-        Using the normal polynomial is about 2.5x slower during the initial generation.
-        I know it doesn't matter as it only saves a few ms (or seconds at most), but god damn, just let me have
-        some fun here, will ya? Just truncating (rather than rounding) the array would also half the processing
-        time, but that would decrease the precision and is also just unnecessary.
-        """
-        x = np.arange(0, 1, 1 / (1 << 8))
-        z = (1 - (x * (1.124 + x * (-9.466 + x * (36.624 + x * (-45.47 + x * 18.188)))))) ** ((y ** 2) * luma_scaling)
-        if clip.format.sample_type == vs.INTEGER:
-            z = z * 255
-            z = np.rint(z).astype(int)
-        return z.tolist()
-
-    def generate_mask(n, f, clip):
-        frameluma = round(f.props.PlaneStatsAverage * 999)
-        table = lut[int(frameluma)]
-        return core.std.Lut(clip, lut=table)
-
-    lut = [None] * 1000
-    for y in np.arange(0, 1, 0.001):
-        lut[int(round(y * 1000))] = fill_lut(y)
-
-    luma = get_y(fvf.Depth(clip, 8)).std.PlaneStats()
+    mask = core.adg.Mask(clip.std.PlaneStats(), luma_scaling)
     grained = core.grain.Add(clip, var=strength, constant=static)
-
-    mask = core.std.FrameEval(luma, partial(generate_mask, clip=luma), prop_src=luma)
-    mask = core.resize.Spline36(mask, clip.width, clip.height)
-
     if get_depth(clip) != 8:
         mask = fvf.Depth(mask, bits=get_depth(clip))
     if show_mask:
