@@ -195,9 +195,10 @@ def retinex_edgemask(src: vs.VideoNode, sigma=1) -> vs.VideoNode:
     sigma is the sigma of tcanny
     """
     luma = get_y(src)
+    max_value = 1 if src.format.sample_type == vs.FLOAT else (1 << get_depth(src)) - 1
     ret = core.retinex.MSRCP(luma, sigma=[50, 200, 350], upper_thr=0.005)
-    return core.std.Expr([kirsch(luma), ret.tcanny.TCanny(mode=1, sigma=sigma).std.Minimum(
-        coordinates=[1, 0, 1, 0, 0, 1, 0, 1])], 'x y +')
+    tcanny = ret.tcanny.TCanny(mode=1, sigma=sigma).std.Minimum(coordinates=[1, 0, 1, 0, 0, 1, 0, 1])
+    return core.std.Expr([kirsch(luma), tcanny], f'x y + {max_value} min')
 
 
 def kirsch(src: vs.VideoNode) -> vs.VideoNode:
