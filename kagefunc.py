@@ -107,7 +107,7 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
     mask = core.adg.Mask(clip.std.PlaneStats(), luma_scaling)
     grained = core.grain.Add(clip, var=strength, constant=static)
     if get_depth(clip) != 8:
-        mask = fvf.Depth(mask, bits=get_depth(clip))
+        mask = depth(mask, get_depth(clip))
     if show_mask:
         return mask
 
@@ -272,7 +272,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
     subedge = core.std.Expr(c444, 'x y z min min')
 
     clip, ref = get_y(clip), get_y(ref)
-    ref = ref if clip.format == ref.format else fvf.Depth(ref, bits)
+    ref = ref if clip.format == ref.format else depth(ref, bits)
 
     clips = [clip.std.Convolution([1] * 9), ref.std.Convolution([1] * 9)]
     diff = core.std.Expr(clips, difexpr, vs.GRAY8).std.Maximum().std.Maximum()
@@ -280,7 +280,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
     mask = core.misc.Hysteresis(subedge, diff)
     mask = iterate(mask, core.std.Maximum, expand_n)
     mask = mask.std.Inflate().std.Inflate().std.Convolution([1] * 9)
-    return fvf.Depth(mask, bits, range=1, range_in=1)
+    return depth(mask, bits, range=1, range_in=1)
 
 
 def hardsubmask_fades(clip, ref, expand_n=8, highpass=5000):
