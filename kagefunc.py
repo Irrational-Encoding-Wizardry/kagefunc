@@ -82,7 +82,8 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
     generates qp-filename for keyframes to simplify timing
     """
     import os
-    clip = core.resize.Bilinear(clip, 640, 360)  # speed up the analysis by resizing first
+    # Speed up the analysis by resizing first. Converting to 8 bit also seems to improve the accuracy of wwxd.
+    clip = core.resize.Bilinear(clip, 640, 360, format=vs.YUV420P8)
     clip = core.wwxd.WWXD(clip)
     out_txt = "# WWXD log file, using qpfile format\n\n"
     for i in range(clip.num_frames):
@@ -91,9 +92,8 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
         if i % 1000 == 0:
             print(i)
     out_path = fallback(out_path, os.path.expanduser("~") + "/Desktop/keyframes.txt")
-    text_file = open(out_path, "w")
-    text_file.write(out_txt)
-    text_file.close()
+    with open(out_path, "w") as text_file:
+        text_file.write(out_txt)
 
 
 def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=12, show_mask=False) -> vs.VideoNode:
