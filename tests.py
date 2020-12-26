@@ -45,6 +45,9 @@ class KagefuncTests(unittest.TestCase):
         mask.get_frame(0)
 
     def test_crossfade(self):
+        faded = kgf.crossfade(self.WHITE_SAMPLE_CLIP, self.BLACK_SAMPLE_CLIP, 50)
+        self.assertEqual(len(faded), len(self.WHITE_SAMPLE_CLIP) + len(self.BLACK_SAMPLE_CLIP) - 50)
+
         faded = kgf.crossfade(self.WHITE_SAMPLE_CLIP, self.BLACK_SAMPLE_CLIP, 1)
         # this isn’t exactly 0.5 because… reasons?
         self.assertLess(abs(faded.std.PlaneStats().get_frame(len(self.WHITE_SAMPLE_CLIP)-1).props.PlaneStatsAverage - 0.5), 0.02)
