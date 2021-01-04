@@ -75,8 +75,8 @@ def _generate_descale_mask(source, downscaled, upscaled, threshold=0.05):
 
 
 # Currently, this should fail for non mod4 subsampled input.
-# Not really relevant, though, as 480p, 576p, 720p, and 1080p are all mod32
-def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
+# Not really relevant though, as 480p, 576p, 720p, and 1080p are all mod32
+def generate_keyframes(clip: vs.VideoNode, out_path: str = None, header: bool = True) -> None:
     """
     probably only useful for fansubbing
     generates qp-filename for keyframes to simplify timing
@@ -85,12 +85,12 @@ def generate_keyframes(clip: vs.VideoNode, out_path=None) -> None:
     # Speed up the analysis by resizing first. Converting to 8 bit also seems to improve the accuracy of wwxd.
     clip = core.resize.Bilinear(clip, 640, 360, format=vs.YUV420P8)
     clip = core.wwxd.WWXD(clip)
-    out_txt = "# WWXD log file, using qpfile format\n\n"
+    out_txt = "# WWXD log file, using qpfile format\n\n" if header else ""
     for i in range(clip.num_frames):
         if clip.get_frame(i).props.Scenechange == 1:
-            out_txt += "%d I -1\n" % i
-        if i % 1000 == 0:
-            print(i)
+            out_txt += f"{i} I -1\n" if i != 0 else ""
+        if i % 1 == 0:
+            print(f"Progress: {i}/{clip.num_frames} frames", end="\r")
     out_path = fallback(out_path, os.path.expanduser("~") + "/Desktop/keyframes.txt")
     with open(out_path, "w") as text_file:
         text_file.write(out_txt)
