@@ -86,11 +86,10 @@ def generate_keyframes(clip: vs.VideoNode, out_path: str = None, header: bool = 
     clip = core.resize.Bilinear(clip, 640, 360, format=vs.YUV420P8)
     clip = core.wwxd.WWXD(clip)
     out_txt = "# WWXD log file, using qpfile format\n\n" if header else ""
-    for i in range(clip.num_frames):
+    for i in range(1, clip.num_frames):
         if clip.get_frame(i).props.Scenechange == 1:
-            out_txt += f"{i} I -1\n" if i != 0 else ""
-        if i % 1 == 0:
-            print(f"Progress: {i}/{clip.num_frames} frames", end="\r")
+            out_txt += f"{i} I -1\n"
+        print(f"Progress: {i}/{clip.num_frames} frames", end="\r")
     out_path = fallback(out_path, os.path.expanduser("~") + "/Desktop/keyframes.txt")
     with open(out_path, "w") as text_file:
         text_file.write(out_txt)
