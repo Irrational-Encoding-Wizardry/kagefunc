@@ -115,8 +115,10 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
 
 
 # TODO: implement blending zone in which both clips are merged to avoid abrupt and visible kernel changes.
-def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=720, thr=0.00015,
-                       debug=False) -> vs.VideoNode:
+# also TODO: this should extract the luma so the descale branch works on 420 input
+def conditional_resize(
+    src: vs.VideoNode, kernel='bilinear', width=1280, height=720, thr=0.00015, debug=False
+) -> vs.VideoNode:
     """
     Fix oversharpened upscales by comparing a regular downscale with a blurry bicubic kernel downscale.
     Similar to the avisynth function. thr is lower in vapoursynth because it's normalized (between 0 and 1)
@@ -126,9 +128,11 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=
         error_default = diff_default.get_frame(n).props.PlaneStatsDiff
         error_os = diff_os.get_frame(n).props.PlaneStatsDiff
         if debug:
-            debugstring = "error when scaling with {:s}: {:.5f}\nerror when scaling with bicubic (b=0, c=1): " \
-                          "{:.5f}\nUsing sharp debicubic: {:s}".format(kernel, error_default, error_os,
-                                                                       str(error_default - thr > error_os))
+            debugstring = """
+Error when scaling with {:s}: {:.5f}
+Error when scaling with bicubic (b=0, c=1): {:.5f}
+Using sharp debicubic: {:s}
+""".format(kernel, error_default, error_os, str(error_default - thr > error_os))
             oversharpened = oversharpened.sub.Subtitle(debugstring)
             down = down.sub.Subtitle(debugstring)
         if error_default - thr > error_os:
@@ -136,8 +140,8 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=
         return down
 
     if hasattr(core, 'descale'):
-        down = get_descale_filter(kernel)(width, height)
-        oversharpened = core.descale.Debicubic(width, height, b=0, c=1)
+        down = get_descale_filter(kernel)(src, width, height)
+        oversharpened = src.descale.Debicubic(width, height, b=0, c=1)
     else:
         down = src.fmtc.resample(width, height, kernel=kernel, invks=True)
         oversharpened = src.fmtc.resample(width, height, kernel='bicubic', a1=0, a2=1, invks=True)
@@ -151,7 +155,9 @@ def conditional_resize(src: vs.VideoNode, kernel='bilinear', width=1280, height=
     diff_os = core.std.PlaneStats(oversharpened_up, src_luma)
 
     return core.std.FrameEval(
-        down, partial(compare, down=down, oversharpened=oversharpened, diff_os=diff_os, diff_default=diff_default))
+        down,
+        partial(compare, down=down, oversharpened=oversharpened, diff_os=diff_os, diff_default=diff_default)
+    )
 
 
 def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offset_y: int) -> vs.VideoNode:
