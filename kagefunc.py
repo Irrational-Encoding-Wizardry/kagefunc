@@ -105,8 +105,6 @@ def adaptive_grain(clip: vs.VideoNode, strength=0.25, static=True, luma_scaling=
     """
     mask = core.adg.Mask(clip.std.PlaneStats(), luma_scaling)
     grained = core.grain.Add(clip, var=strength, constant=static)
-    if get_depth(clip) != 8:
-        mask = depth(mask, get_depth(clip))
     if show_mask:
         return mask
 
