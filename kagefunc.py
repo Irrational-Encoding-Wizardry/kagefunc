@@ -10,10 +10,21 @@ import fvsfunc as fvf
 core = vs.core
 
 
-def inverse_scale(source: vs.VideoNode, width: int = None, height: int = 0, kernel: str = 'bilinear', taps: int = 4,
-                  b: float = 1 / 3, c: float = 1 / 3, mask_detail: bool = False, descale_mask_zones: str = '',
-                  denoise: bool = False, bm3d_sigma: float = 1, knl_strength: float = 0.4, use_gpu: bool = True) \
-        -> vs.VideoNode:
+def inverse_scale(
+    source: vs.VideoNode,
+    width: int = None,
+    height: int = 0,
+    kernel: str = 'bilinear',
+    taps: int = 4,
+    b: float = 1 / 3,
+    c: float = 1 / 3,
+    mask_detail: bool = False,
+    descale_mask_zones: str = '',
+    denoise: bool = False,
+    bm3d_sigma: float = 1,
+    knl_strength: float = 0.4,
+    use_gpu: bool = True,
+) -> vs.VideoNode:
     """
     Use descale to reverse the scaling on a given input clip.
     width, height, kernel, taps, a1, a2 are parameters for resizing.
@@ -56,11 +67,17 @@ def _descale_chroma(planes, width, height):
     return planes
 
 
-def mask_descale(original: vs.VideoNode, descaled: vs.VideoNode, upscaled: vs.VideoNode,
-                 threshold: float = 0.05, zones: str = '', debug: bool = False):
+def mask_descale(
+    original: vs.VideoNode,
+    descaled: vs.VideoNode,
+    upscaled: vs.VideoNode,
+    threshold: float = 0.05,
+    zones: str = '',
+    debug: bool = False,
+):
     downscaled = core.resize.Spline36(original, descaled.width, descaled.height)
     assert get_depth(original) == get_depth(descaled), "Source and descaled clip need to have the same bitdepth"
-    detail_mask = _generate_descale_mask(original, descaled, upscaled)
+    detail_mask = _generate_descale_mask(original, descaled, upscaled, threshold)
     if debug:
         return detail_mask
     merged = core.std.MaskedMerge(descaled, downscaled, detail_mask)
@@ -68,8 +85,11 @@ def mask_descale(original: vs.VideoNode, descaled: vs.VideoNode, upscaled: vs.Vi
 
 
 def _generate_descale_mask(source, downscaled, upscaled, threshold=0.05):
-    mask = core.std.Expr([source, upscaled], 'x y - abs') \
-        .resize.Bicubic(downscaled.width, downscaled.height).std.Binarize(threshold)
+    mask = (
+        core.std.Expr([source, upscaled], 'x y - abs')
+        .resize.Bicubic(downscaled.width, downscaled.height)
+        .std.Binarize(threshold)
+    )
     mask = iterate(mask, core.std.Maximum, 2)
     return iterate(mask, core.std.Inflate, 2)
 
@@ -82,6 +102,7 @@ def generate_keyframes(clip: vs.VideoNode, out_path: str = None, header: bool = 
     generates qp-filename for keyframes to simplify timing
     """
     import os
+
     # Speed up the analysis by resizing first. Converting to 8 bit also seems to improve the accuracy of wwxd.
     clip = core.resize.Bilinear(clip, 640, 360, format=vs.YUV420P8)
     clip = core.wwxd.WWXD(clip)
@@ -129,7 +150,9 @@ def conditional_resize(
 Error when scaling with {:s}: {:.5f}
 Error when scaling with bicubic (b=0, c=1): {:.5f}
 Using sharp debicubic: {:s}
-""".format(kernel, error_default, error_os, str(error_default - thr > error_os))
+""".format(
+                kernel, error_default, error_os, str(error_default - thr > error_os)
+            )
             oversharpened = oversharpened.sub.Subtitle(debugstring)
             down = down.sub.Subtitle(debugstring)
         if error_default - thr > error_os:
@@ -152,8 +175,7 @@ Using sharp debicubic: {:s}
     diff_os = core.std.PlaneStats(oversharpened_up, src_luma)
 
     return core.std.FrameEval(
-        down,
-        partial(compare, down=down, oversharpened=oversharpened, diff_os=diff_os, diff_default=diff_default)
+        down, partial(compare, down=down, oversharpened=oversharpened, diff_os=diff_os, diff_default=diff_default)
     )
 
 
@@ -259,9 +281,9 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
     yexpr = 'x y - abs {thr} > 255 0 ?'.format(thr=y_range * 0.7)
     uvexpr = 'x {uv_abs} {thr} < y {uv_abs} {thr} < and 255 0 ?'.format(uv_abs=uv_abs, thr=uv_range * 0.1)
 
-    difexpr = 'x {upper} > x {lower} < or x y - abs {mindiff} > and 255 0 ?'.format(upper=y_range * 0.8 + offset,
-                                                                                    lower=y_range * 0.2 + offset,
-                                                                                    mindiff=y_range * 0.1)
+    difexpr = 'x {upper} > x {lower} < or x y - abs {mindiff} > and 255 0 ?'.format(
+        upper=y_range * 0.8 + offset, lower=y_range * 0.2 + offset, mindiff=y_range * 0.1
+    )
 
     # right shift by 4 pixels.
     # fmtc uses at least 16 bit internally, so it's slower for 8 bit,
@@ -316,7 +338,10 @@ def crossfade(clipa, clipb, duration):
 
     if clipa.format.id != clipb.format.id or clipa.height != clipb.height or clipa.width != clipb.width:
         raise ValueError('Crossfade: Both clips must have the same dimensions and format.')
-    fade = core.std.FrameEval(core.std.BlankClip(clipa, length=duration+1), partial(fade_image, clipa=clipa[-duration-1:], clipb=clipb[:duration]))
+    fade = core.std.FrameEval(
+        core.std.BlankClip(clipa, length=duration + 1),
+        partial(fade_image, clipa=clipa[-duration - 1 :], clipb=clipb[:duration]),
+    )
     return clipa[:-duration] + fade[1:] + clipb[duration:]
 
 
@@ -335,6 +360,7 @@ def hybriddenoise(src, knl=0.5, sigma=2, radius1=1):
 
 
 # helpers
+
 
 def getw(height, aspect_ratio=16 / 9, only_even=True):
     """

@@ -8,10 +8,12 @@ import kagefunc as kgf
 
 
 class KagefuncTests(unittest.TestCase):
-    BLACK_SAMPLE_CLIP = vs.core.std.BlankClip(_format=vs.YUV420P8, width=160, height=120, color=[0, 128, 128],
-                                              length=100)
-    WHITE_SAMPLE_CLIP = vs.core.std.BlankClip(_format=vs.YUV420P8, width=160, height=120, color=[255, 128, 128],
-                                              length=100)
+    BLACK_SAMPLE_CLIP = vs.core.std.BlankClip(
+        _format=vs.YUV420P8, width=160, height=120, color=[0, 128, 128], length=100
+    )
+    WHITE_SAMPLE_CLIP = vs.core.std.BlankClip(
+        _format=vs.YUV420P8, width=160, height=120, color=[255, 128, 128], length=100
+    )
     GREYSCALE_SAMPLE_CLIP = vs.core.std.BlankClip(_format=vs.GRAY8, width=160, height=120, color=[255])
 
     def test_retinex_edgemask(self):
@@ -50,7 +52,9 @@ class KagefuncTests(unittest.TestCase):
 
         faded = kgf.crossfade(self.WHITE_SAMPLE_CLIP, self.BLACK_SAMPLE_CLIP, 1)
         # this isn’t exactly 0.5 because… reasons?
-        self.assertLess(abs(faded.std.PlaneStats().get_frame(len(self.WHITE_SAMPLE_CLIP)-1).props.PlaneStatsAverage - 0.5), 0.02)
+        self.assertLess(
+            abs(faded.std.PlaneStats().get_frame(len(self.WHITE_SAMPLE_CLIP) - 1).props.PlaneStatsAverage - 0.5), 0.02
+        )
         self.assertEqual(len(faded), len(self.WHITE_SAMPLE_CLIP) + len(self.BLACK_SAMPLE_CLIP) - 1)
 
     def test_adaptive_grain(self):
@@ -79,12 +83,16 @@ class KagefuncTests(unittest.TestCase):
         """
         Assert that two clips have the same number of bits per sample.
         """
-        self.assertEqual(clip_a.format.bits_per_sample, clip_b.format.bits_per_sample,
-                         'Same depth expected, was {clip_a.format.bits_per_sample} and {clip_b.format.bits_per_sample}')
+        self.assertEqual(
+            clip_a.format.bits_per_sample,
+            clip_b.format.bits_per_sample,
+            'Same depth expected, was {clip_a.format.bits_per_sample} and {clip_b.format.bits_per_sample}',
+        )
 
     def assert_same_length(self, clip_a: vs.VideoNode, clip_b: vs.VideoNode):
-        self.assertEqual(len(clip_a), len(clip_b),
-                         'Same number of frames expected, was {len(clip_a)} and {len(clip_b)}.')
+        self.assertEqual(
+            len(clip_a), len(clip_b), 'Same number of frames expected, was {len(clip_a)} and {len(clip_b)}.'
+        )
 
     def assert_same_metadata(self, clip_a: vs.VideoNode, clip_b: vs.VideoNode):
         """
