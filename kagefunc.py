@@ -231,10 +231,11 @@ def kirsch(src: vs.VideoNode) -> vs.VideoNode:
     Kirsch edge detection. This uses 8 directions, so it's slower but better than Sobel (4 directions).
     more information: https://ddl.kageru.moe/konOJ.pdf
     """
-    weights = [5] * 3 + [-3] * 5
-    weights = [weights[-i:] + weights[:-i] for i in range(4)]
-    clip = [core.std.Convolution(src, (w[:4] + [0] + w[4:]), saturate=False) for w in weights]
-    return core.std.Expr(clip, 'x y max z max a max')
+    kirsch1 = src.std.Convolution(matrix=[ 5,  5,  5, -3,  0, -3, -3, -3, -3], saturate=False)
+    kirsch2 = src.std.Convolution(matrix=[-3,  5,  5, -3,  0,  5, -3, -3, -3], saturate=False)
+    kirsch3 = src.std.Convolution(matrix=[-3, -3,  5, -3,  0,  5, -3, -3,  5], saturate=False)
+    kirsch4 = src.std.Convolution(matrix=[-3, -3, -3, -3,  0,  5, -3,  5,  5], saturate=False)
+    return core.std.Expr([kirsch1, kirsch2, kirsch3, kirsch4], 'x y max z max a max')
 
 
 def get_descale_filter(kernel: str, **kwargs):
@@ -279,7 +280,7 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
 
     uv_abs = ' abs ' if stype == vs.FLOAT else ' {} - abs '.format((1 << bits) // 2)
     yexpr = 'x y - abs {thr} > 255 0 ?'.format(thr=y_range * 0.7)
-    uvexpr = 'x {uv_abs} {thr} < y {uv_abs} {thr} < and 255 0 ?'.format(uv_abs=uv_abs, thr=uv_range * 0.1)
+    uvexpr = 'x {uv_abs} {thr} < y {uv_abs} {thr} < and 255 0 ?'.format(uv_abs=uv_abs, thr=uv_range * 0.8)
 
     difexpr = 'x {upper} > x {lower} < or x y - abs {mindiff} > and 255 0 ?'.format(
         upper=y_range * 0.8 + offset, lower=y_range * 0.2 + offset, mindiff=y_range * 0.1
