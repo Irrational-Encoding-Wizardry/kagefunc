@@ -272,7 +272,11 @@ def hardsubmask(clip: vs.VideoNode, ref: vs.VideoNode, expand_n=None) -> vs.Vide
 
     expand_n = fallback(expand_n, clip.width // 200)
 
-    yuv_fmt = core.register_format(clp_f.color_family, vs.INTEGER, 8, clp_f.subsampling_w, clp_f.subsampling_h)
+    fmt_args = (clp_f.color_family, vs.INTEGER, 8, clp_f.subsampling_w, clp_f.subsampling_h)
+    try:
+        yuv_fmt = core.query_video_format(*fmt_args)
+    except AttributeError:
+        yuv_fmt = core.register_format(*fmt_args)
 
     y_range = 219 << (bits - 8) if stype == vs.INTEGER else 1
     uv_range = 224 << (bits - 8) if stype == vs.INTEGER else 1
