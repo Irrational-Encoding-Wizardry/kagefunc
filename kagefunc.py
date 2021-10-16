@@ -193,7 +193,7 @@ def squaremask(clip: vs.VideoNode, width: int, height: int, offset_x: int, offse
     mask_format = clip.format.replace(color_family=vs.GRAY, subsampling_w=0, subsampling_h=0)
     white = 1 if mask_format.sample_type == vs.FLOAT else (1 << bits) - 1
 
-    center = core.std.BlankClip(clip, width=width, height=height, _format=mask_format, color=white, length=1)
+    center = core.std.BlankClip(clip, width=width, height=height, format=mask_format, color=white, length=1)
 
     if offset_x:
         left = core.std.BlankClip(center, width=offset_x, height=height, color=0)

@@ -9,12 +9,12 @@ import kagefunc as kgf
 
 class KagefuncTests(unittest.TestCase):
     BLACK_SAMPLE_CLIP = vs.core.std.BlankClip(
-        _format=vs.YUV420P8, width=160, height=120, color=[0, 128, 128], length=100
+        format=vs.YUV420P8, width=160, height=120, color=[0, 128, 128], length=100
     )
     WHITE_SAMPLE_CLIP = vs.core.std.BlankClip(
-        _format=vs.YUV420P8, width=160, height=120, color=[255, 128, 128], length=100
+        format=vs.YUV420P8, width=160, height=120, color=[255, 128, 128], length=100
     )
-    GREYSCALE_SAMPLE_CLIP = vs.core.std.BlankClip(_format=vs.GRAY8, width=160, height=120, color=[255])
+    GREYSCALE_SAMPLE_CLIP = vs.core.std.BlankClip(format=vs.GRAY8, width=160, height=120, color=[255])
 
     def test_retinex_edgemask(self):
         mask = kgf.retinex_edgemask(self.BLACK_SAMPLE_CLIP)
