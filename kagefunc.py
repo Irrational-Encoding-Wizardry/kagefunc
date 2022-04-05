@@ -9,6 +9,21 @@ import fvsfunc as fvf
 
 core = vs.core
 
+__all__ = [
+    'inverse_scale',
+    'mask_descale',
+    'generate_keyframes',
+    'adaptive_grain',
+    'conditional_resize',
+    'squaremask',
+    'retinex_edgemask',
+    'kirsch',
+    'get_descale_filter',
+    'hardsubmask',
+    'hardsubmask_fades',
+    'crossfade',
+    'hybriddenoise',
+]
 
 def inverse_scale(
     source: vs.VideoNode,
