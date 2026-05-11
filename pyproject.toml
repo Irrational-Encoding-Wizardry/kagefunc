@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kagefunc"
+version = "1.0.0"
+description = "kageru's collection of VapourSynth functions"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = [
+    "vapoursynth",
+    "vsutil",
+    "vapoursynth-adaptivegrain",
+]
+
+[project.urls]
+Homepage = "https://github.com/kageru/kagefunc"
+
+[tool.hatch.build.targets.wheel]
+py-modules = ["kagefunc"]
