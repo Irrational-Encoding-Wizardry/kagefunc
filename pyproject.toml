@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kagefunc"
-version = "1.0.0"
+version = "1.0.1"
 description = "kageru's collection of VapourSynth functions"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kageru/kagefunc"
+Homepage = "https://github.com/Irrational-Encoding-Wizardry/kagefunc"
 
 [tool.hatch.build.targets.wheel]
 py-modules = ["kagefunc"]
